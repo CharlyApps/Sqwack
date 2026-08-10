@@ -87,6 +87,17 @@ interface ProviderUsage {
 }
 ```
 
+```ts
+interface SystemSnapshot {   // host machine stats + last ~10min history
+  stats: { cpuPercent, cpuUserPercent, cpuSystemPercent, ramUsedBytes, ramTotalBytes,
+           diskUsedBytes, diskTotalBytes, uptimeSeconds, processCount, networkMbps, collectedAt };
+  history: { cpu: number[]; ram: number[]; network: number[] };
+}
+// Snapshot also carries: topProcesses (top-5 by CPU), activity (recent event feed),
+// per-session `activity` (per-minute event bins, sparkline data), and per-process
+// cpuPercent / memoryBytes / cpuHistory.
+```
+
 ## REST endpoints
 
 | Method & path | Auth | Description |
@@ -94,7 +105,7 @@ interface ProviderUsage {
 | `GET /v1/health` | none | `{ status, version, machineId }` |
 | `POST /v1/pair` | none (rate-limited) | body `{ code, deviceName }` → `{ token, deviceId, machine }`; codes are single-use, 5-min expiry |
 | `POST /v1/pair/start` | admin | begin pairing → `{ code, expiresAt }` |
-| `GET /v1/snapshot` | yes | `{ machine, status, sessions, attention, processes, usage, connectedAt }` |
+| `GET /v1/snapshot` | yes | `{ machine, status, sessions, attention, processes, usage, system, topProcesses, activity, connectedAt }` |
 | `POST /v1/events` | yes | ingest a canonical event; `202` accepted, `200` + `duplicate: true`, `400` invalid |
 | `POST /v1/hooks/claude` | admin | raw Claude Code hook payload → normalized + ingested |
 | `POST /v1/hooks/codex` | admin | raw Codex notify payload → normalized + ingested |
@@ -117,6 +128,7 @@ type ServerMessage =
   | { type: "session.updated";   data: AgentSession }
   | { type: "processes.updated"; data: DevProcess[] }  // every ~20s and after kills
   | { type: "usage.updated";     data: ProviderUsage[] } // every ~2min, on change
+  | { type: "system.updated";    data: SystemSnapshot }  // every ~10s
   | { type: "status.updated";    data: SqwackStatus }  // only on change
   | { type: "heartbeat";         timestamp: string };  // every 30s
 ```
