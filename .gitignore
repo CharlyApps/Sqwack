@@ -1,0 +1,5 @@
+node_modules/
+.DS_Store
+*.sqwack-backup
+ios/build/
+DerivedData/

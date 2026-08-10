@@ -1,0 +1,24 @@
+{
+  "name": "sqwackd",
+  "version": "0.1.0",
+  "description": "Sqwack local machine daemon",
+  "type": "module",
+  "private": true,
+  "bin": { "sqwackd": "./bin/sqwackd" },
+  "engines": { "node": ">=24" },
+  "scripts": {
+    "start": "node src/index.ts start",
+    "demo": "node src/index.ts demo",
+    "demo:events": "node src/index.ts demo",
+    "test": "node --test tests/*.test.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "@types/ws": "^8.5.10",
+    "typescript": "^5.7.0"
+  }
+}

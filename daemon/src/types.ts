@@ -1,0 +1,128 @@
+// Canonical wire types. Documented in docs/protocol.md — keep in sync.
+
+export type AgentState =
+  | "working"
+  | "needs_input"
+  | "done"
+  | "failed"
+  | "idle"
+  | "unknown";
+
+export type SqwackStatus = "quiet" | "working" | "attention" | "failure";
+
+export type Provider =
+  | "codex"
+  | "claude"
+  | "deepseek"
+  | "hermes"
+  | "system"
+  | "generic";
+
+export type EventType =
+  | "agent.started"
+  | "agent.working"
+  | "agent.needs_input"
+  | "agent.finished"
+  | "agent.failed"
+  | "agent.idle"
+  | "process.started"
+  | "process.stopped"
+  | "process.failed"
+  | "system.heartbeat";
+
+export interface SqwackEvent {
+  id: string;
+  schemaVersion: 1;
+  machineId: string;
+  timestamp: string;
+  source: {
+    provider: Provider;
+    integration: string;
+    surface?: "cli" | "desktop" | "ide" | "cloud" | "manual";
+  };
+  type: EventType;
+  sessionId?: string;
+  project?: { id?: string; name?: string; cwd?: string };
+  title?: string;
+  message?: string;
+  severity?: "info" | "success" | "warning" | "error";
+  metadata?: Record<string, unknown>;
+}
+
+export interface AgentSession {
+  id: string;
+  machineId: string;
+  provider: Exclude<Provider, "system">;
+  projectId?: string;
+  projectName?: string;
+  cwd?: string;
+  title?: string;
+  state: AgentState;
+  summary?: string;
+  startedAt?: string;
+  updatedAt: string;
+  finishedAt?: string;
+  waitingSince?: string;
+  source: string;
+  metadata?: Record<string, unknown>;
+}
+
+export interface Machine {
+  id: string;
+  name: string;
+  hostname: string;
+  platform: string;
+  architecture: string;
+  daemonVersion: string;
+  status: "online" | "offline" | "degraded";
+  lastSeenAt: string;
+  capabilities: string[];
+}
+
+export interface DevProcess {
+  id: string;
+  machineId: string;
+  pid: number;
+  name: string;
+  command?: string;
+  cwd?: string;
+  port?: number;
+  protocol?: string;
+  startedAt?: string;
+  category?: "node" | "java" | "python" | "database" | "other";
+  killable: boolean;
+}
+
+export interface IntegrationCapability {
+  integration: string;
+  installed: boolean;
+  surfaces: string[];
+  events: string[];
+  confidence: "native" | "derived" | "best_effort";
+}
+
+export interface Snapshot {
+  machine: Machine;
+  status: SqwackStatus;
+  sessions: AgentSession[];
+  attention: AgentSession[];
+  processes: DevProcess[];
+  connectedAt: string;
+}
+
+export type ServerMessage =
+  | { type: "snapshot"; data: Snapshot }
+  | { type: "event"; data: SqwackEvent }
+  | { type: "session.updated"; data: AgentSession }
+  | { type: "processes.updated"; data: DevProcess[] }
+  | { type: "status.updated"; data: SqwackStatus }
+  | { type: "heartbeat"; timestamp: string };
+
+export const STATE_PRIORITY: AgentState[] = [
+  "needs_input",
+  "failed",
+  "done",
+  "working",
+  "idle",
+  "unknown",
+];

@@ -1,0 +1,5 @@
+#!/bin/sh
+# Resolve symlinks so this works when linked into /usr/local/bin
+SELF="$0"
+while [ -L "$SELF" ]; do SELF="$(readlink "$SELF")"; done
+exec node "$(cd "$(dirname "$SELF")/.." && pwd)/src/index.ts" "$@"
