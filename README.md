@@ -68,13 +68,54 @@ open ios/Sqwack.xcodeproj
 Select the **Sqwack** scheme and an iPad (simulator or device), then Run. There
 are no third-party Swift dependencies.
 
+## Set up Tailscale (recommended for remote access)
+
+Tailscale gives the iPad a private, encrypted path to the daemon from anywhere —
+no port forwarding, nothing exposed publicly. Skip this section if you only ever
+use the iPad on your home LAN.
+
+1. **On the Mac** — install Tailscale and sign in:
+
+   ```bash
+   brew install --cask tailscale-app
+   open -a Tailscale
+   ```
+
+   (or download from <https://tailscale.com/download/macos>). Sign in and note
+   the Mac's tailnet name — `sqwackd status` will show it once connected, e.g.
+   `mac-mini.your-tailnet.ts.net`.
+
+2. **On the iPad** — install the Tailscale app from the App Store and sign in
+   to the **same tailnet** (same account).
+
+3. **Tell the daemon to serve on the tailnet** — edit `~/.sqwack/config.json`:
+
+   ```json
+   "network": { "port": 4737, "bind": "127.0.0.1", "tailscaleServe": true }
+   ```
+
+   then restart the daemon:
+
+   ```bash
+   sqwackd setup
+   ```
+
+   With `tailscaleServe` on, the daemon stays bound to `127.0.0.1` and
+   Tailscale Serve proxies tailnet traffic to it — nothing listens on your LAN
+   or the public internet. Sqwack never uses Tailscale Funnel.
+
+4. Verify: `sqwackd status` should show `Tailscale  reachable (…)`, and
+   `sqwackd doctor` checks the whole chain.
+
+When pairing (next section), give the iPad the Tailscale address, e.g.
+`mac-mini.your-tailnet.ts.net` or the Mac's `100.x.y.z` Tailscale IP.
+
 ## Pair the iPad
 
 1. On the Mac: make the daemon reachable from the iPad — either
-   - **Tailscale (recommended):** set `"tailscaleServe": true` in
-     `~/.sqwack/config.json` (keeps the daemon bound to 127.0.0.1; Tailscale
-     proxies tailnet traffic), then restart it (`sqwackd setup`), or
-   - **LAN:** set `"bind": "0.0.0.0"` in `~/.sqwack/config.json` and restart.
+   - **Tailscale (recommended):** follow the section above, or
+   - **LAN only:** set `"bind": "0.0.0.0"` in `~/.sqwack/config.json` and
+     restart with `sqwackd setup`.
 2. Run `sqwackd pair`. It prints an 8-character single-use code (valid 5
    minutes) and the addresses the iPad can use.
 3. In the app, enter the address and the code. The code is exchanged for a
