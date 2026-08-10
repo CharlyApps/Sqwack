@@ -117,8 +117,35 @@ function cmdSetup(): void {
   );
   mkdirSync(join(DATA_DIR, "logs"), { recursive: true });
   const uid = process.getuid?.();
-  try { execFileSync("launchctl", ["bootout", `gui/${uid}/com.sqwack.sqwackd`], { stdio: "ignore" }); } catch { /* not loaded */ }
-  execFileSync("launchctl", ["bootstrap", `gui/${uid}`, PLIST_PATH]);
+  const label = `gui/${uid}/com.sqwack.sqwackd`;
+  const sleep = (ms: number) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+  const loaded = () => {
+    try { execFileSync("launchctl", ["print", label], { stdio: "ignore" }); return true; } catch { return false; }
+  };
+  // Unload any previous instance and wait until launchd has actually let go —
+  // bootstrapping while the old instance is still unloading fails with EIO.
+  if (loaded()) {
+    try { execFileSync("launchctl", ["bootout", label], { stdio: "ignore" }); } catch { /* already going down */ }
+    for (let i = 0; i < 20 && loaded(); i++) sleep(250);
+  }
+  let lastError = "";
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      execFileSync("launchctl", ["bootstrap", `gui/${uid}`, PLIST_PATH], { stdio: "pipe" });
+      lastError = "";
+      break;
+    } catch (err) {
+      lastError = String((err as { stderr?: Buffer }).stderr ?? err).trim();
+      sleep(1000);
+    }
+  }
+  if (lastError) {
+    console.error(`Could not load the LaunchAgent: ${lastError}`);
+    console.error(`Plist written to ${PLIST_PATH}. Try:`);
+    console.error(`  launchctl bootout ${label}   # then wait a moment`);
+    console.error(`  launchctl bootstrap gui/${uid} ${PLIST_PATH}`);
+    process.exit(1);
+  }
   console.log(`Installed LaunchAgent: ${PLIST_PATH}`);
   console.log("sqwackd is now running and will start at login.");
   console.log("Uninstall with: sqwackd uninstall");
