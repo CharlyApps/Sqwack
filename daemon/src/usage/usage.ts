@@ -111,13 +111,57 @@ function findKey(obj: unknown, key: string): unknown {
 }
 
 /**
- * All providers. Claude Code does not expose account rate limits in any local
- * file (verified against transcripts), so Claude has no usage entry rather
- * than a fabricated one — an adapter slot exists for when it does.
+ * Claude usage comes from the same OAuth usage endpoint Claude Code's /usage
+ * panel uses, authenticated with the token Claude Code already keeps in the
+ * macOS Keychain. The token is read at call time, never persisted, never
+ * logged, and never leaves this machine — only percentages go to the iPad.
  */
-export function collectUsage(): ProviderUsage[] {
+export async function collectClaudeUsage(): Promise<ProviderUsage | undefined> {
+  let token: string | undefined;
+  try {
+    const { execFileSync } = await import("node:child_process");
+    const raw = execFileSync("security", ["find-generic-password", "-s", "Claude Code-credentials", "-w"], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+    token = (JSON.parse(raw) as { claudeAiOauth?: { accessToken?: string } }).claudeAiOauth?.accessToken;
+  } catch {
+    return undefined; // no keychain entry / access denied: no meter, no noise
+  }
+  if (!token) return undefined;
+  try {
+    const res = await fetch("https://api.anthropic.com/api/oauth/usage", {
+      headers: { Authorization: `Bearer ${token}`, "anthropic-beta": "oauth-2025-04-20", "Content-Type": "application/json" },
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (!res.ok) return undefined;
+    const body = (await res.json()) as Record<string, { utilization?: number; resets_at?: string | null } | null>;
+    const windows: UsageWindow[] = [];
+    for (const [key, label] of [["five_hour", "5h"], ["seven_day", "week"], ["seven_day_opus", "opus wk"]] as const) {
+      const w = body[key];
+      if (w && typeof w.utilization === "number") {
+        windows.push({
+          label,
+          usedPercent: Math.round(w.utilization * 10) / 10,
+          resetsAt: w.resets_at ?? undefined,
+        });
+      }
+    }
+    if (windows.length === 0) return undefined;
+    return { provider: "claude", windows, collectedAt: new Date().toISOString(), source: "claude-oauth" };
+  } catch {
+    return undefined; // offline or endpoint changed: show nothing rather than stale fakes
+  }
+}
+
+/** All providers, best-effort each; a failing provider simply has no entry. */
+export async function collectUsage(): Promise<ProviderUsage[]> {
   const usage: ProviderUsage[] = [];
-  const codex = collectCodexUsage();
+  const [codex, claude] = await Promise.all([
+    Promise.resolve(collectCodexUsage()),
+    collectClaudeUsage(),
+  ]);
+  if (claude) usage.push(claude);
   if (codex) usage.push(codex);
   return usage;
 }

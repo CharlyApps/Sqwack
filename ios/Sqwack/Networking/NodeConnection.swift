@@ -18,6 +18,9 @@ final class NodeConnection {
     private(set) var sessions: [String: AgentSession] = [:]
     private(set) var processes: [DevProcess] = []
     private(set) var usage: [ProviderUsage] = []
+    private(set) var system: SystemSnapshot?
+    private(set) var topProcesses: [ProcessMetric] = []
+    private(set) var activity: [ActivityItem] = []
     private(set) var lastHeartbeat: Date?
 
     private var socket: URLSessionWebSocketTask?
@@ -90,6 +93,9 @@ final class NodeConnection {
             sessions = Dictionary(uniqueKeysWithValues: snapshot.sessions.map { ($0.id, $0) })
             processes = snapshot.processes
             usage = snapshot.usage ?? []
+            system = snapshot.system
+            topProcesses = snapshot.topProcesses ?? []
+            activity = snapshot.activity ?? []
             lastHeartbeat = .now
         case .sessionUpdated(let session):
             sessions[session.id] = session
@@ -97,6 +103,8 @@ final class NodeConnection {
             processes = procs
         case .usageUpdated(let newUsage):
             usage = newUsage
+        case .systemUpdated(let newSystem):
+            system = newSystem
         case .statusUpdated(let newStatus):
             status = newStatus
         case .heartbeat:

@@ -47,6 +47,7 @@ struct AgentSession: Codable, Identifiable, Equatable {
     var finishedAt: Date?
     var waitingSince: Date?
     var source: String
+    var activity: [Int]?
 }
 
 struct Machine: Codable, Identifiable, Equatable {
@@ -73,11 +74,14 @@ struct DevProcess: Codable, Identifiable, Equatable {
     var startedAt: Date?
     var category: String?
     var killable: Bool
+    var cpuPercent: Double?
+    var memoryBytes: Int64?
+    var cpuHistory: [Double]?
 
     enum CodingKeys: String, CodingKey {
         case id, machineId, pid, name, command, cwd, port
         case protocolName = "protocol"
-        case startedAt, category, killable
+        case startedAt, category, killable, cpuPercent, memoryBytes, cpuHistory
     }
 }
 
@@ -106,6 +110,45 @@ struct ProviderUsage: Codable, Equatable, Identifiable {
     var id: String { provider }
 }
 
+struct SystemStats: Codable, Equatable {
+    var cpuPercent: Double
+    var cpuUserPercent: Double
+    var cpuSystemPercent: Double
+    var ramUsedBytes: Int64
+    var ramTotalBytes: Int64
+    var diskUsedBytes: Int64
+    var diskTotalBytes: Int64
+    var uptimeSeconds: Int
+    var processCount: Int
+    var networkMbps: Double
+    var collectedAt: Date
+}
+
+struct SystemSnapshot: Codable, Equatable {
+    var stats: SystemStats
+    var history: SystemHistory
+    struct SystemHistory: Codable, Equatable {
+        var cpu: [Double]
+        var ram: [Double]
+        var network: [Double]
+    }
+}
+
+struct ProcessMetric: Codable, Identifiable, Equatable {
+    var pid: Int
+    var name: String
+    var cpuPercent: Double
+    var memoryBytes: Int64
+    var id: Int { pid }
+}
+
+struct ActivityItem: Codable, Identifiable, Equatable {
+    var timestamp: Date
+    var message: String
+    var severity: String
+    var id: String { "\(timestamp.timeIntervalSince1970)-\(message)" }
+}
+
 struct Snapshot: Codable {
     var machine: Machine
     var status: SqwackStatus
@@ -113,6 +156,9 @@ struct Snapshot: Codable {
     var attention: [AgentSession]
     var processes: [DevProcess]
     var usage: [ProviderUsage]?
+    var system: SystemSnapshot?
+    var topProcesses: [ProcessMetric]?
+    var activity: [ActivityItem]?
     var connectedAt: Date
 }
 
@@ -122,6 +168,7 @@ enum ServerMessage {
     case sessionUpdated(AgentSession)
     case processesUpdated([DevProcess])
     case usageUpdated([ProviderUsage])
+    case systemUpdated(SystemSnapshot)
     case statusUpdated(SqwackStatus)
     case heartbeat
     case unknown
@@ -146,6 +193,9 @@ extension ServerMessage {
         case "usage.updated":
             guard let p = try? decoder.decode(Payload<[ProviderUsage]>.self, from: data) else { return .unknown }
             return .usageUpdated(p.data)
+        case "system.updated":
+            guard let p = try? decoder.decode(Payload<SystemSnapshot>.self, from: data) else { return .unknown }
+            return .systemUpdated(p.data)
         case "status.updated":
             guard let p = try? decoder.decode(Payload<SqwackStatus>.self, from: data) else { return .unknown }
             return .statusUpdated(p.data)

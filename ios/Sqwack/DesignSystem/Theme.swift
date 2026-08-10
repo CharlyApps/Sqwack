@@ -53,6 +53,9 @@ extension Color {
 extension String {
     /// Provider display name ("codex" -> "CODEX").
     var providerLabel: String { uppercased() }
+
+    /// "9m ago" -> "9m ago" with only the first letter uppercased.
+    var sentenceCased: String { prefix(1).uppercased() + dropFirst() }
 }
 
 extension Date {

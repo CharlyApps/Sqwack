@@ -94,6 +94,14 @@ export class Store {
       .map((r) => JSON.parse(r.payload as string));
   }
 
+  /** Event timestamps for one raw session id since a cutoff (sparkline bins). */
+  sessionEventTimes(rawSessionId: string, sinceIso: string): number[] {
+    return this.db
+      .prepare("SELECT timestamp FROM events WHERE session_id = ? AND timestamp > ? ORDER BY timestamp")
+      .all(rawSessionId, sinceIso)
+      .map((r) => Date.parse(r.timestamp as string));
+  }
+
   // --- devices (paired iPads) ---
   addDevice(id: string, name: string, tokenHash: string): void {
     this.db

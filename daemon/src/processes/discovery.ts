@@ -98,7 +98,8 @@ export async function discoverProcesses(machineId: string, excludeCommands: stri
     if (!category) continue;
     if (excludeCommands.some((x) => command.includes(x) || d?.fullCommand.includes(x))) continue;
     const ports = [...new Set(entries.map((e) => e.port))].sort((a, b) => a - b);
-    const name = d?.cwd && d.cwd !== process.env.HOME ? basename(d.cwd) : command;
+    const cwdName = d?.cwd && d.cwd !== process.env.HOME ? basename(d.cwd) : "";
+    const name = pid === process.pid ? "sqwackd" : cwdName || command;
     result.push({
       id: processId(pid, d?.started),
       machineId,

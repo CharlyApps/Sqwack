@@ -1,26 +1,44 @@
 import SwiftUI
 
 /// The ambient screen. One second from several feet away must answer:
-/// "Does anything need me?" Four regions max: status header, agent cards,
-/// services strip, attention strip.
+/// "Does anything need me?" Status header dominates; agent cards carry the
+/// detail; Services / System / Activity sit in a calm bottom band.
 struct OverviewView: View {
     @Environment(SqwackStore.self) private var store
 
     var body: some View {
         TimelineView(.periodic(from: .now, by: 1)) { _ in
-            VStack(alignment: .leading, spacing: 28) {
-                StatusHeader()
-                AgentCardsRow()
-                Spacer(minLength: 0)
-                HStack(alignment: .top, spacing: 32) {
-                    ServicesStrip()
-                    if !store.usage.isEmpty { UsageStrip() }
-                    if !store.attention.isEmpty { AttentionStrip() }
+            ScrollView {
+                VStack(alignment: .leading, spacing: 24) {
+                    BrandHeader()
+                    StatusHeader()
+                    AgentCardsRow()
+                    HStack(alignment: .top, spacing: 20) {
+                        ServicesPanel()
+                        SystemPanel()
+                        ActivityPanel()
+                    }
+                    if !store.usage.isEmpty { AccountUsageBand() }
+                    FooterBar()
                 }
+                .padding(28)
             }
-            .padding(32)
         }
         .background(Color(.systemBackground))
+    }
+}
+
+private struct BrandHeader: View {
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "waveform.path.ecg")
+                .font(.title2.weight(.bold))
+                .foregroundStyle(.blue)
+            Text("SQWACK")
+                .font(.system(.title3, design: .rounded, weight: .heavy))
+                .kerning(1)
+            Spacer()
+        }
     }
 }
 
@@ -40,7 +58,7 @@ private struct StatusHeader: View {
         switch store.globalStatus {
         case .attention: "Agents are waiting for you"
         case .failure: "Something failed"
-        default: "Nothing needs you"
+        default: "Nothing needs you right now."
         }
     }
 
@@ -48,27 +66,30 @@ private struct StatusHeader: View {
         let status = store.globalStatus
         HStack(alignment: .top) {
             VStack(alignment: .leading, spacing: 6) {
-                HStack(spacing: 18) {
+                HStack(spacing: 16) {
                     Circle()
                         .fill(status.color)
-                        .frame(width: 28, height: 28)
-                        .modifier(statusPulse(status))
+                        .frame(width: 24, height: 24)
+                        .modifier(status == .attention ? AnyModifier(AttentionPulse()) : AnyModifier(EmptyModifier()))
                     Text(status.headline)
-                        .font(.system(size: 64, weight: .heavy, design: .rounded))
+                        .font(.system(size: 56, weight: .heavy, design: .rounded))
                         .foregroundStyle(status == .quiet ? Color.primary : status.color)
                 }
                 Text(subline)
-                    .font(.title2)
+                    .font(.title3)
                     .foregroundStyle(.secondary)
                 Text(needLine)
-                    .font(.title3)
-                    .foregroundStyle(store.globalStatus == .attention || store.globalStatus == .failure ? status.color : Color.secondary)
+                    .font(.body)
+                    .foregroundStyle(status == .attention || status == .failure ? status.color : Color.secondary)
             }
             Spacer()
-            VStack(alignment: .trailing, spacing: 6) {
+            VStack(alignment: .trailing, spacing: 4) {
                 Text(Date.now, format: .dateTime.hour().minute())
-                    .font(.system(size: 40, weight: .medium, design: .rounded))
+                    .font(.system(size: 38, weight: .medium, design: .rounded))
                     .foregroundStyle(.secondary)
+                Text(Date.now, format: .dateTime.weekday(.abbreviated).day().month(.abbreviated))
+                    .font(.title3)
+                    .foregroundStyle(.tertiary)
                 if !store.anyConnected {
                     Label("Reconnecting…", systemImage: "wifi.slash")
                         .font(.callout)
@@ -76,10 +97,6 @@ private struct StatusHeader: View {
                 }
             }
         }
-    }
-
-    private func statusPulse(_ status: SqwackStatus) -> some ViewModifier {
-        status == .attention ? AnyModifier(AttentionPulse()) : AnyModifier(EmptyModifier())
     }
 }
 
@@ -100,11 +117,11 @@ private struct AgentCardsRow: View {
             Text("No recent agent activity")
                 .font(.title3)
                 .foregroundStyle(.tertiary)
-                .frame(maxWidth: .infinity, minHeight: 180)
-                .background(RoundedRectangle(cornerRadius: 24).fill(Color(.secondarySystemBackground)))
+                .frame(maxWidth: .infinity, minHeight: 160)
+                .background(RoundedRectangle(cornerRadius: 20).fill(Color(.secondarySystemBackground)))
         } else {
             ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 20) {
+                HStack(spacing: 16) {
                     ForEach(sessions.prefix(6)) { session in
                         AgentCard(session: session)
                     }
@@ -119,111 +136,144 @@ struct AgentCard: View {
 
     private var timeLabel: String {
         switch session.state {
-        case .needsInput: (session.waitingSince ?? session.updatedAt).elapsedLabel
-        case .working: (session.startedAt ?? session.updatedAt).elapsedLabel
-        default: session.updatedAt.agoLabel
+        case .needsInput: "Waiting " + (session.waitingSince ?? session.updatedAt).elapsedLabel
+        case .working: "Running " + (session.startedAt ?? session.updatedAt).elapsedLabel
+        default: session.updatedAt.agoLabel.sentenceCased
         }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(spacing: 12) {
+                ProviderBadge(provider: session.provider)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(session.provider.providerLabel)
+                        .font(.system(.headline, design: .rounded, weight: .bold))
+                    Text(session.projectName ?? session.title ?? session.source)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+            }
+            HStack(spacing: 8) {
+                Circle().fill(session.state.color).frame(width: 9, height: 9)
+                Text(session.state.label)
+                    .font(.system(.title3, design: .rounded, weight: .heavy))
+                    .foregroundStyle(session.state.color)
+            }
+            Text(timeLabel)
+                .font(.callout.monospacedDigit())
+                .foregroundStyle(.secondary)
+            Sparkline(
+                values: (session.activity ?? []).map(Double.init),
+                color: session.state.color
+            )
+            .frame(height: 28)
+        }
+        .padding(18)
+        .frame(width: 250, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 20)
+                .fill(Color(.secondarySystemBackground))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 20)
+                        .strokeBorder(session.state.color.opacity(session.state == .needsInput ? 0.9 : 0.3), lineWidth: session.state == .needsInput ? 2.5 : 1)
+                )
+        )
+        .modifier(session.state == .needsInput ? AnyModifier(AttentionPulse()) : AnyModifier(EmptyModifier()))
+    }
+}
+
+private struct AccountUsageBand: View {
+    @Environment(SqwackStore.self) private var store
+
+    var body: some View {
+        Panel(title: "ACCOUNT USAGE") {
+            HStack(alignment: .top, spacing: 16) {
+                ForEach(store.usage) { usage in
+                    UsageCard(usage: usage)
+                }
+            }
+        }
+    }
+}
+
+private struct UsageCard: View {
+    let usage: ProviderUsage
+
+    /// The window that should dominate the card: the shortest (most urgent).
+    private var primary: UsageWindow? {
+        usage.windows.min { a, b in a.label < b.label } // "5h" sorts before "week"
+    }
+
+    private var barColor: Color {
+        guard let p = primary else { return .green }
+        return p.usedPercent >= 90 ? .red : p.usedPercent >= 70 ? .amber : .blue
+    }
+
+    private func resetText(_ window: UsageWindow) -> String {
+        guard let resets = window.resetsAt else { return "" }
+        let hours = Int(resets.timeIntervalSinceNow / 3600)
+        let when = resets.formatted(date: .abbreviated, time: .omitted)
+        if hours <= 0 { return "Resets soon" }
+        if hours < 24 { return "Resets in \(hours)h" }
+        return "Resets in \(hours / 24) days · \(when)"
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text(session.provider.providerLabel)
-                .font(.system(.title3, design: .rounded, weight: .bold))
-                .foregroundStyle(.secondary)
-            Text(session.state.label)
-                .font(.system(size: 34, weight: .heavy, design: .rounded))
-                .foregroundStyle(session.state.color)
-                .lineLimit(1)
-                .minimumScaleFactor(0.6)
-            Text(session.projectName ?? session.title ?? session.source)
-                .font(.title3.weight(.medium))
-                .lineLimit(1)
-            Text(timeLabel)
-                .font(.system(.title3, design: .monospaced))
-                .foregroundStyle(.secondary)
-        }
-        .padding(24)
-        .frame(width: 260, alignment: .leading)
-        .background(
-            RoundedRectangle(cornerRadius: 24)
-                .fill(Color(.secondarySystemBackground))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 24)
-                        .strokeBorder(session.state.color.opacity(session.state == .needsInput ? 0.9 : 0.35), lineWidth: session.state == .needsInput ? 3 : 1.5)
-                )
-        )
-        .modifier(cardEffect)
-    }
-
-    private var cardEffect: AnyModifier {
-        switch session.state {
-        case .needsInput: AnyModifier(AttentionPulse())
-        case .working: AnyModifier(EmptyModifier())
-        default: AnyModifier(EmptyModifier())
-        }
-    }
-}
-
-private struct ServicesStrip: View {
-    @Environment(SqwackStore.self) private var store
-
-    var body: some View {
-        let processes = store.processes()
-        VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 10) {
-                Text("SERVICES")
-                    .font(.headline)
-                    .foregroundStyle(.secondary)
-                Text("\(processes.count)")
-                    .font(.headline)
-                    .foregroundStyle(.tertiary)
-            }
-            if processes.isEmpty {
-                Text("None running")
-                    .foregroundStyle(.tertiary)
-            }
-            ForEach(processes.prefix(5)) { process in
-                HStack(spacing: 12) {
-                    Circle().fill(.green).frame(width: 10, height: 10)
-                    Text(verbatim: process.port.map { ":\($0)" } ?? "—")
-                        .font(.system(.body, design: .monospaced))
-                        .foregroundStyle(.secondary)
-                        .frame(width: 64, alignment: .leading)
-                    Text(process.name)
-                        .font(.body.weight(.medium))
-                        .lineLimit(1)
-                }
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-}
-
-private struct UsageStrip: View {
-    @Environment(SqwackStore.self) private var store
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("USAGE")
-                .font(.headline)
-                .foregroundStyle(.secondary)
-            ForEach(store.usage) { usage in
-                HStack(spacing: 14) {
-                    Text(usage.provider.providerLabel)
-                        .font(.system(.body, design: .rounded, weight: .bold))
-                        .foregroundStyle(.secondary)
-                        .frame(width: 76, alignment: .leading)
-                    ForEach(usage.windows) { window in
-                        UsageMeter(window: window)
+                ProviderBadge(provider: usage.provider, size: 36)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(usage.provider.capitalized).font(.headline)
+                    if let plan = usage.planType {
+                        Text(plan.capitalized).font(.caption).foregroundStyle(.secondary)
                     }
                 }
             }
+            if let primary {
+                Text(verbatim: "\(Int(primary.usedPercent))%")
+                    .font(.system(.title, design: .rounded, weight: .heavy))
+                Text(usage.windows.map { "\($0.label) \(Int($0.usedPercent))%" }.joined(separator: " · "))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                MeterBar(fraction: primary.usedPercent / 100, color: barColor)
+                Text(resetText(primary))
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+            }
         }
+        .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 14).fill(Color(.tertiarySystemBackground)))
     }
 }
 
-private struct UsageMeter: View {
+private struct FooterBar: View {
+    @Environment(SqwackStore.self) private var store
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "checkmark.shield")
+                .foregroundStyle(store.anyConnected ? .green : .orange)
+            Text("Connected to ").foregroundStyle(.secondary)
+                + Text(store.machineName).foregroundStyle(.blue)
+            Spacer()
+            Circle().fill(store.anyConnected ? .green : .red).frame(width: 8, height: 8)
+            Text(store.anyConnected ? "Connected" : "Disconnected")
+                .foregroundStyle(store.anyConnected ? .green : .red)
+            Spacer()
+            Text("Daemon v" + (store.nodes.first?.machine?.daemonVersion ?? "—"))
+                .foregroundStyle(.secondary)
+        }
+        .font(.callout)
+        .padding(.horizontal, 20)
+        .padding(.vertical, 12)
+        .background(RoundedRectangle(cornerRadius: 14).fill(Color(.secondarySystemBackground)))
+    }
+}
+
+struct UsageMeter: View {
     let window: UsageWindow
 
     private var barColor: Color {
@@ -252,47 +302,137 @@ private struct UsageMeter: View {
                         .foregroundStyle(.tertiary)
                 }
             }
-            GeometryReader { geo in
-                ZStack(alignment: .leading) {
-                    Capsule().fill(Color(.tertiarySystemFill))
-                    Capsule()
-                        .fill(barColor)
-                        .frame(width: max(4, geo.size.width * min(window.usedPercent, 100) / 100))
-                }
-            }
-            .frame(width: 110, height: 6)
+            MeterBar(fraction: window.usedPercent / 100, color: barColor)
+                .frame(width: 110)
         }
     }
 }
 
-private struct AttentionStrip: View {
+// MARK: - Bottom band
+
+private struct ServicesPanel: View {
     @Environment(SqwackStore.self) private var store
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 10) {
-                Text("ATTENTION")
-                    .font(.headline)
-                    .foregroundStyle(Color.amber)
-                Text("\(store.attention.count)")
-                    .font(.headline)
-                    .foregroundStyle(.tertiary)
+        let processes = store.processes()
+        Panel(title: "SERVICES", badge: "\(processes.count)") {
+            if processes.isEmpty {
+                Text("None running").foregroundStyle(.tertiary)
             }
-            ForEach(store.attention.prefix(3)) { session in
+            ForEach(processes.prefix(4)) { process in
                 HStack(spacing: 12) {
-                    Image(systemName: session.state == .failed ? "xmark.octagon.fill" : "exclamationmark.triangle.fill")
-                        .foregroundStyle(session.state.color)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("\(session.provider.capitalized) · \(session.projectName ?? session.source)")
-                            .font(.body.weight(.semibold))
-                        Text(session.summary ?? (session.state == .failed ? "Failed" : "Waiting for input"))
-                            .font(.callout)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                    }
+                    Circle().fill(.green).frame(width: 9, height: 9)
+                    Text(verbatim: process.port.map { ":\($0)" } ?? "—")
+                        .font(.system(.body, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 62, alignment: .leading)
+                    Text(process.name)
+                        .font(.body.weight(.medium))
+                        .lineLimit(1)
+                    Spacer()
+                    Text(process.category ?? "")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
                 }
+                if process.id != processes.prefix(4).last?.id { Divider() }
             }
         }
+    }
+}
+
+private struct SystemPanel: View {
+    @Environment(SqwackStore.self) private var store
+
+    var body: some View {
+        Panel(title: "SYSTEM") {
+            if let system = store.system {
+                HStack(spacing: 12) {
+                    StatTile(label: "CPU", value: "\(Int(system.stats.cpuPercent))", suffix: "%",
+                             fraction: system.stats.cpuPercent / 100, color: .blue, history: system.history.cpu)
+                    StatTile(label: "RAM", value: Format.bytes(system.stats.ramUsedBytes).replacingOccurrences(of: " GB", with: ""), suffix: " GB",
+                             detail: "of \(Format.bytes(system.stats.ramTotalBytes))",
+                             fraction: Double(system.stats.ramUsedBytes) / Double(system.stats.ramTotalBytes), color: .purple, history: system.history.ram)
+                    StatTile(label: "UPTIME", value: Format.uptime(system.stats.uptimeSeconds), suffix: "",
+                             color: .purple, history: system.history.network)
+                }
+                HStack(spacing: 8) {
+                    Image(systemName: "desktopcomputer").font(.caption)
+                    Text(store.machineName).font(.caption)
+                    Spacer()
+                    Text(store.machineInfo).font(.caption)
+                }
+                .foregroundStyle(.tertiary)
+                .padding(.top, 4)
+            } else {
+                Text("Waiting for system stats…").foregroundStyle(.tertiary)
+            }
+        }
+    }
+}
+
+private struct StatTile: View {
+    let label: String
+    let value: String
+    let suffix: String
+    var detail: String?
+    var fraction: Double?
+    var color: Color = .blue
+    var history: [Double] = []
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(label)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+            (Text(value).font(.system(.title2, design: .rounded, weight: .bold))
+                + Text(suffix).font(.callout.weight(.semibold)).foregroundStyle(.secondary))
+                .lineLimit(1)
+                .minimumScaleFactor(0.6)
+            if let detail {
+                Text(detail).font(.caption2).foregroundStyle(.tertiary)
+            }
+            if let fraction {
+                MeterBar(fraction: fraction, color: color, height: 5)
+            }
+            Sparkline(values: history, color: color)
+                .frame(height: 18)
+        }
+        .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 12).fill(Color(.tertiarySystemBackground)))
+    }
+}
+
+private struct ActivityPanel: View {
+    @Environment(SqwackStore.self) private var store
+
+    private func dotColor(_ severity: String) -> Color {
+        switch severity {
+        case "success": .green
+        case "warning": .amber
+        case "error": .red
+        default: .blue
+        }
+    }
+
+    var body: some View {
+        Panel(title: "ACTIVITY") {
+            if store.activity.isEmpty {
+                Text("No recent activity").foregroundStyle(.tertiary)
+            }
+            ForEach(store.activity.prefix(5)) { item in
+                HStack(spacing: 10) {
+                    Circle().fill(dotColor(item.severity)).frame(width: 8, height: 8)
+                    Text(item.message)
+                        .font(.subheadline)
+                        .lineLimit(1)
+                    Spacer()
+                    Text(item.timestamp.agoLabel)
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                }
+                if item.id != store.activity.prefix(5).last?.id { Divider() }
+            }
+        }
     }
 }

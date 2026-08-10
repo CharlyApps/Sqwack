@@ -67,6 +67,18 @@ final class SqwackStore {
             .sorted { ($0.port ?? 0) < ($1.port ?? 0) }
     }
 
+    /// MVP: system stats of the first (only) machine. Multi-machine: key by machineId.
+    var system: SystemSnapshot? { nodes.first?.system }
+    var topProcesses: [ProcessMetric] { nodes.first?.topProcesses ?? [] }
+    var activity: [ActivityItem] {
+        nodes.flatMap(\.activity).sorted { $0.timestamp > $1.timestamp }
+    }
+    var machineName: String { nodes.first?.machine?.name ?? "" }
+    var machineInfo: String {
+        guard let m = nodes.first?.machine else { return "" }
+        return "\(m.platform)/\(m.architecture)"
+    }
+
     var usage: [ProviderUsage] {
         nodes.flatMap(\.usage).sorted { $0.provider < $1.provider }
     }

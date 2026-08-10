@@ -5,6 +5,8 @@ import { machineInfo } from "./config.ts";
 import { reduceEvent, sessionKey, computeStatus, attentionSessions, sweepStale } from "./sessions/reducer.ts";
 import { discoverProcesses } from "./processes/discovery.ts";
 import { collectUsage, type ProviderUsage } from "./usage/usage.ts";
+import { collectSystemStats, topProcesses, type ProcessMetric } from "./system/stats.ts";
+import type { ActivityItem, SystemSnapshot } from "./types.ts";
 import { log } from "./log.ts";
 
 /** Central state machine: events in, session/status updates + broadcasts out. */
@@ -13,6 +15,10 @@ export class Engine {
   private lastStatus: SqwackStatus = "quiet";
   private processes: DevProcess[] = [];
   private usage: ProviderUsage[] = [];
+  private system: SystemSnapshot | undefined;
+  private processMetrics = new Map<number, ProcessMetric>();
+  private top: ProcessMetric[] = [];
+  private serviceCpuHistory = new Map<number, number[]>();
 
   public store: Store;
   public config: Config;
@@ -76,17 +82,78 @@ export class Engine {
   }
 
   async refreshProcesses(): Promise<DevProcess[]> {
-    this.processes = await discoverProcesses(this.config.machineId, this.config.processFilters.excludeCommands);
+    const discovered = await discoverProcesses(this.config.machineId, this.config.processFilters.excludeCommands);
+    // Enrich with per-process cpu/mem from the latest system sample.
+    const livePids = new Set(discovered.map((p) => p.pid));
+    for (const pid of this.serviceCpuHistory.keys()) if (!livePids.has(pid)) this.serviceCpuHistory.delete(pid);
+    for (const proc of discovered) {
+      const metric = this.processMetrics.get(proc.pid);
+      if (metric) {
+        proc.cpuPercent = metric.cpuPercent;
+        proc.memoryBytes = metric.memoryBytes;
+        const history = this.serviceCpuHistory.get(proc.pid) ?? [];
+        history.push(metric.cpuPercent);
+        if (history.length > 30) history.shift();
+        this.serviceCpuHistory.set(proc.pid, history);
+        proc.cpuHistory = history;
+      }
+    }
+    this.processes = discovered;
     this.broadcast({ type: "processes.updated", data: this.processes });
     return this.processes;
+  }
+
+  async refreshSystem(): Promise<void> {
+    const { stats, processMetrics } = await collectSystemStats();
+    this.processMetrics = processMetrics;
+    this.top = topProcesses(processMetrics);
+    const history = this.system?.history ?? { cpu: [], ram: [], network: [] };
+    const push = (arr: number[], value: number) => {
+      arr.push(Math.round(value * 10) / 10);
+      if (arr.length > 60) arr.shift();
+    };
+    push(history.cpu, stats.cpuPercent);
+    push(history.ram, (stats.ramUsedBytes / stats.ramTotalBytes) * 100);
+    push(history.network, stats.networkMbps);
+    this.system = { stats, history };
+    this.broadcast({ type: "system.updated", data: this.system });
+  }
+
+  /** Human-readable feed of the most recent normalized events. */
+  private recentActivity(limit = 20): ActivityItem[] {
+    return this.store
+      .recentEvents(limit)
+      .filter((e) => e.type.startsWith("agent."))
+      .map((e) => {
+        const who = e.source.provider.charAt(0).toUpperCase() + e.source.provider.slice(1);
+        const project = e.project?.name ? ` (${e.project.name})` : "";
+        const verb = e.type.replace("agent.", "").replace("needs_input", "needs input").replace("started", "started").replace("finished", "finished");
+        return {
+          timestamp: e.timestamp,
+          message: `${who}${project} ${verb}`,
+          severity: e.severity ?? "info",
+        };
+      });
+  }
+
+  /** Per-minute event counts for the last 30 minutes for one session. */
+  private sessionActivity(sessionId: string): number[] {
+    const raw = sessionId.includes(":") ? sessionId.slice(sessionId.indexOf(":") + 1) : sessionId;
+    const since = Date.now() - 30 * 60_000;
+    const bins = new Array<number>(30).fill(0);
+    for (const ts of this.store.sessionEventTimes(raw, new Date(since).toISOString())) {
+      const bin = Math.min(29, Math.max(0, Math.floor((ts - since) / 60_000)));
+      bins[bin]++;
+    }
+    return bins;
   }
 
   cachedProcesses(): DevProcess[] {
     return this.processes;
   }
 
-  refreshUsage(): void {
-    const usage = collectUsage();
+  async refreshUsage(): Promise<void> {
+    const usage = await collectUsage();
     if (JSON.stringify(usage.map(u => ({...u, collectedAt: ""}))) !== JSON.stringify(this.usage.map(u => ({...u, collectedAt: ""})))) {
       this.broadcast({ type: "usage.updated", data: usage });
     }
@@ -95,13 +162,17 @@ export class Engine {
 
   snapshot(): Snapshot {
     const sessions = this.store.allSessions();
+    const withActivity = sessions.slice(0, 50).map((s) => ({ ...s, activity: this.sessionActivity(s.id) }));
     return {
       machine: machineInfo(this.config),
       status: computeStatus(sessions),
-      sessions: sessions.slice(0, 50),
+      sessions: withActivity,
       attention: attentionSessions(sessions),
       processes: this.processes,
       usage: this.usage,
+      system: this.system,
+      topProcesses: this.top,
+      activity: this.recentActivity(),
       connectedAt: new Date().toISOString(),
     };
   }

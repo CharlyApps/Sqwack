@@ -49,6 +49,12 @@ export interface SqwackEvent {
   metadata?: Record<string, unknown>;
 }
 
+export interface ActivityItem {
+  timestamp: string;
+  message: string;
+  severity: "info" | "success" | "warning" | "error";
+}
+
 export interface AgentSession {
   id: string;
   machineId: string;
@@ -65,6 +71,8 @@ export interface AgentSession {
   waitingSince?: string;
   source: string;
   metadata?: Record<string, unknown>;
+  /** Transient: per-minute event counts for the last 30 min (sparklines). */
+  activity?: number[];
 }
 
 export interface Machine {
@@ -91,6 +99,9 @@ export interface DevProcess {
   startedAt?: string;
   category?: "node" | "java" | "python" | "database" | "other";
   killable: boolean;
+  cpuPercent?: number;
+  memoryBytes?: number;
+  cpuHistory?: number[];
 }
 
 export interface IntegrationCapability {
@@ -108,7 +119,15 @@ export interface Snapshot {
   attention: AgentSession[];
   processes: DevProcess[];
   usage: import("./usage/usage.ts").ProviderUsage[];
+  system?: SystemSnapshot;
+  topProcesses?: import("./system/stats.ts").ProcessMetric[];
+  activity?: ActivityItem[];
   connectedAt: string;
+}
+
+export interface SystemSnapshot {
+  stats: import("./system/stats.ts").SystemStats;
+  history: { cpu: number[]; ram: number[]; network: number[] };
 }
 
 export type ServerMessage =
@@ -117,6 +136,7 @@ export type ServerMessage =
   | { type: "session.updated"; data: AgentSession }
   | { type: "processes.updated"; data: DevProcess[] }
   | { type: "usage.updated"; data: import("./usage/usage.ts").ProviderUsage[] }
+  | { type: "system.updated"; data: SystemSnapshot }
   | { type: "status.updated"; data: SqwackStatus }
   | { type: "heartbeat"; timestamp: string };
 
