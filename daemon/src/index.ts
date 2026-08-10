@@ -41,6 +41,27 @@ function tailscaleBin(): string | undefined {
   }
 }
 
+function tailscaleServeActive(port: number): boolean {
+  const bin = tailscaleBin();
+  if (!bin) return false;
+  try {
+    // The App Store CLI exits 0 even on failure, so trust the output, not the exit code.
+    return execFileSync(bin, ["serve", "status"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).includes(`:${port}`);
+  } catch {
+    return false;
+  }
+}
+
+/** Apply tailnet-only TCP serve for the daemon port. Returns true when verified active. */
+function applyTailscaleServe(port: number): boolean {
+  const bin = tailscaleBin();
+  if (!bin) return false;
+  try {
+    execFileSync(bin, ["serve", "--bg", `--tcp=${port}`, `tcp://127.0.0.1:${port}`], { stdio: "ignore" });
+  } catch { /* verified below */ }
+  return tailscaleServeActive(port);
+}
+
 function tailscaleInfo(): { hostname?: string; ip?: string } {
   const bin = tailscaleBin();
   if (!bin) return {};
@@ -65,18 +86,14 @@ async function cmdStart(): Promise<void> {
   const api = startServer(engine);
   log.info(`machine ${config.machineName} (${config.machineId})`);
   if (config.network.tailscaleServe) {
-    // Expose the API inside the tailnet only (never Funnel). The daemon can
-    // stay bound to 127.0.0.1; tailscale serve proxies tailnet traffic to it.
-    const bin = tailscaleBin();
-    if (!bin) {
-      log.warn("network.tailscaleServe is on but Tailscale is not installed");
+    // Serve config persists inside tailscaled, so `sqwackd setup` (which runs
+    // in the user's shell) is the reliable place to apply it: the App Store
+    // Tailscale CLI cannot run headless under launchd. One best-effort attempt
+    // here covers standalone/homebrew tailscale installs; then report honestly.
+    if (applyTailscaleServe(config.network.port)) {
+      log.info(`tailscale serve active on tailnet port ${config.network.port}`);
     } else {
-      try {
-        execFileSync(bin, ["serve", "--bg", `--tcp=${config.network.port}`, `tcp://127.0.0.1:${config.network.port}`], { stdio: "ignore" });
-        log.info(`tailscale serve enabled on tailnet port ${config.network.port}`);
-      } catch (err) {
-        log.warn(`tailscale serve failed: ${String(err)}`);
-      }
+      log.warn("tailscale serve is not active — run 'sqwackd setup' from a terminal to apply it");
     }
   }
   const shutdown = () => {
@@ -148,6 +165,16 @@ function cmdSetup(): void {
   }
   console.log(`Installed LaunchAgent: ${PLIST_PATH}`);
   console.log("sqwackd is now running and will start at login.");
+  const config = loadConfig();
+  if (config.network.tailscaleServe) {
+    // Must happen here (user shell): the App Store Tailscale CLI cannot run
+    // headless under launchd. The serve config persists inside tailscaled.
+    if (applyTailscaleServe(config.network.port)) {
+      console.log(`Tailscale Serve: active — tailnet devices can reach port ${config.network.port}.`);
+    } else {
+      console.log("Tailscale Serve: NOT active — is Tailscale installed, running, and signed in?");
+    }
+  }
   console.log("Uninstall with: sqwackd uninstall");
 }
 
@@ -221,6 +248,10 @@ async function cmdDoctor(): Promise<void> {
   }
   const ts = tailscaleInfo();
   check("Tailscale", !!ts.ip, ts.ip ? `${ts.ip} (${ts.hostname})` : "not installed or not connected");
+  if (config.network.tailscaleServe) {
+    const active = tailscaleServeActive(config.network.port);
+    check("Tailscale Serve", active, active ? `tailnet port ${config.network.port} -> 127.0.0.1` : "not active — run: sqwackd setup");
+  }
   if (alive) {
     let wsOk = false;
     try {
