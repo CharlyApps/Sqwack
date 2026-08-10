@@ -139,6 +139,10 @@ export class Store {
     this.db.prepare("DELETE FROM sessions WHERE updated_at < ?").run(cutoff(sessionDays));
   }
 
+  vacuum(): void {
+    this.db.exec("VACUUM");
+  }
+
   close(): void {
     this.db.close();
   }

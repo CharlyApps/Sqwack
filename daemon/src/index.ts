@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { execFileSync, execFile } from "node:child_process";
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync, mkdirSync, statSync } from "node:fs";
 import { homedir, networkInterfaces } from "node:os";
 import { join, resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -184,6 +184,24 @@ function cmdSetup(): void {
   console.log("Uninstall with: sqwackd uninstall");
 }
 
+function cmdPrune(): void {
+  // Retention runs automatically (on daemon start + every 6h; events 14d,
+  // sessions 30d — configurable in config.json). This forces it now.
+  const config = loadConfig();
+  const dbPath = join(DATA_DIR, "sqwack.db");
+  const sizeBefore = existsSync(dbPath) ? statSync(dbPath).size : 0;
+  const days = args[0] === "--all" ? { events: 0, sessions: 0 } : config.retentionDays;
+  const store = openStore(DATA_DIR);
+  store.prune(days.events, days.sessions);
+  store.vacuum();
+  store.close();
+  const sizeAfter = statSync(dbPath).size;
+  console.log(`Pruned events older than ${days.events}d and sessions older than ${days.sessions}d.`);
+  console.log(`Database: ${(sizeBefore / 1024).toFixed(0)} KB -> ${(sizeAfter / 1024).toFixed(0)} KB`);
+  if (args[0] !== "--all") console.log("Use 'sqwackd prune --all' to clear ALL history now.");
+  console.log("Restart the daemon (sqwackd restart) so its in-memory view refreshes.");
+}
+
 function cmdRestart(): void {
   const uid = process.getuid?.();
   try {
@@ -357,6 +375,7 @@ usage: sqwackd <command>
   start                       run the daemon in the foreground
   setup                       install + start as a LaunchAgent (auto-start at login)
   restart                     restart the daemon (pairing and data are untouched)
+  prune [--all]               apply retention now (or clear all history) and compact the DB
   uninstall                   remove the LaunchAgent
   status                      one-glance daemon status
   pair                        generate a pairing code for the iPad app
@@ -373,6 +392,7 @@ const commands: Record<string, () => void | Promise<void>> = {
   start: cmdStart,
   setup: cmdSetup,
   restart: cmdRestart,
+  prune: cmdPrune,
   uninstall: cmdUninstall,
   status: cmdStatus,
   pair: cmdPair,

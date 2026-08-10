@@ -43,7 +43,7 @@ export function reduceEvent(
     cwd: event.project?.cwd ?? existing?.cwd,
     title: event.title ?? existing?.title,
     state,
-    summary: event.message ?? (state === existing?.state ? existing?.summary : undefined),
+    summary: event.message ?? existing?.summary,
     startedAt: existing?.startedAt ?? event.timestamp,
     updatedAt: event.timestamp,
     finishedAt: state === "done" || state === "failed" ? event.timestamp : undefined,

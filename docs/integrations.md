@@ -7,11 +7,14 @@ Support levels are reported honestly via `GET /v1/integrations` and
 
 | Integration | Support | Confidence | Mechanism |
 |---|---|---|---|
-| Claude Code (CLI) | full | `native` | official lifecycle hooks |
-| Codex (CLI) | partial | `derived` | official `notify` configuration |
-| Claude Desktop | unsupported | — | no supported native event mechanism |
-| Codex Desktop | partial/unknown | — | shares `~/.codex/config.toml`; behavior is capability-tested, not assumed |
+| Claude Code (CLI, desktop app, IDE) | full | `native` | official lifecycle hooks via `~/.claude/settings.json` |
+| Codex (CLI + desktop, interactive) | full | `native` with trusted hooks, else `derived` | lifecycle hooks (`~/.codex/hooks.json`) + `notify` fallback |
+| Codex `exec` (non-interactive) | full | `native` | `sqwack-codex-exec` wrapper over `codex exec --json` |
+| Claude Desktop (chat app) | unsupported | — | no supported native event mechanism |
 | Cloud agent runs | not in MVP | — | schema reserves `surface: "cloud"` |
+
+Integrations apply per *session*: a Claude/Codex session that was already
+running when hooks were installed will not report — start a new session.
 
 ## Claude Code — `claude-code` (native)
 
@@ -31,35 +34,49 @@ The hook script (`~/.sqwack/bin/sqwack-claude-hook`) forwards the hook's stdin
 JSON to `POST /v1/hooks/claude` with a 3s timeout and always exits 0 — a dead
 daemon can never block Claude.
 
-## Codex — `codex-cli` (derived)
+## Codex — three channels, capability-detected
 
-`sqwackd integrations install codex` configures `notify` in
-`~/.codex/config.toml` (user-level, so it applies across Codex surfaces that
-honor it). TOML top-level placement is handled correctly, and:
+`sqwackd integrations install codex` installs all three; the daemon
+shape-detects which one each payload came from on `/v1/hooks/codex`:
 
-- If **no** notify exists: `notify = ["~/.sqwack/bin/sqwack-codex-notify"]`.
-- If a notify **already exists** (e.g. Codex Computer Use): a chain wrapper is
-  installed that forwards to Sqwack *and then* execs your original notifier
-  with the same arguments. Nothing is lost.
+**1. Lifecycle hooks (`codex-hooks`, `native`) — richest.** Merged additively
+into `~/.codex/hooks.json` (backup written; existing hooks preserved):
 
-| Codex notify type | Sqwack event |
+| Codex hook | Sqwack event |
 |---|---|
-| `agent-turn-complete` | `agent.finished` (summary = first 140 chars of last assistant message) |
-| `agent-turn-start` / `session-start` | `agent.working` |
-| `*approval*` | `agent.needs_input` |
+| `SessionStart` | `agent.started` |
+| `UserPromptSubmit` | `agent.working` |
+| `PermissionRequest` | `agent.needs_input` — the amber NEEDS YOU card, with the tool name |
+| `Stop` | `agent.finished` |
+| `SessionEnd` | `agent.idle` |
 
-Codex's notify channel does not expose rich lifecycle state on every surface,
-hence `derived` confidence. Do not expect `working` cards from every Codex
-version; turn completion is the reliable signal.
+The hook script emits nothing on stdout, so it can never influence a
+PermissionRequest decision — Codex's own approval prompt always continues.
+**One manual step:** Codex requires trusting new command hooks — run `/hooks`
+inside Codex once and trust the sqwack entries. Until trusted, the notify
+fallback still reports turn completions.
 
-Capability-tested notes (Codex 0.147, macOS):
-- Interactive sessions (desktop app and CLI) fire notify on turn completion. ✔
-- Non-interactive `codex exec` runs do **not** fire notify — they will not appear in Sqwack.
-- The desktop app reads `config.toml` only at startup: restart it after installing.
-- Codex Computer Use rewrites `notify` on app start, chaining previous notifiers
-  via `--previous-notify` — Sqwack's forwarder therefore takes the *last*
-  argument as the payload and survives being re-chained. Invocations are logged
-  (timestamp + size only) to `~/.sqwack/logs/codex-notify.log`.
+**2. `codex exec --json` wrapper (`codex-exec`, `native`).** Non-interactive
+runs are observable through `~/.sqwack/bin/sqwack-codex-exec` — a drop-in for
+`codex exec` that passes the JSONL stream through untouched and forwards
+`thread.started` / `turn.started` / `turn.completed` / `turn.failed` / `error`
+/ agent messages to Sqwack (so exec runs get WORKING, DONE, and FAILED cards).
+Plain `codex exec` (without the wrapper) fires no notify and stays unobserved.
+
+**3. `notify` fallback (`codex-cli`, `derived`).** Configured in
+`~/.codex/config.toml`; reports turn completions only. Needs no hook trust and
+survives being re-chained by other tools:
+
+- If no notify existed: `notify = [".../sqwack-codex-notify"]`.
+- If one existed (e.g. Codex Computer Use): a chain wrapper preserves it.
+- Codex Computer Use rewrites `notify` on app start and re-chains previous
+  notifiers via `--previous-notify` — the forwarder takes the *last* argument
+  as payload so it survives. Invocations are logged (timestamp + size only) to
+  `~/.sqwack/logs/codex-notify.log`.
+
+Capability-tested notes (Codex 0.147, macOS): the desktop app shares
+`config.toml`/`hooks.json` with the CLI and reads them **only at startup** —
+restart the app after installing.
 
 ## Desktop apps
 

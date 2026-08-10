@@ -146,13 +146,19 @@ resolved.
   Notification/Stop/SessionEnd hooks map to started/working/needs_input/
   finished/idle. A `Stop` means "finished a turn", not "your whole task is
   done" — Sqwack words it that way on purpose.
-- **Codex CLI** (`derived` confidence): the `notify` mechanism reports turn
-  completion; approvals surface when Codex emits them. If you already had a
-  `notify` program configured, the installer chains it — your existing notifier
-  keeps running.
-- **Desktop apps**: no supported native event mechanism today → reported
-  honestly as unsupported in Settings; nothing is faked. See
-  [docs/integrations.md](docs/integrations.md).
+- **Codex** (CLI + desktop app): three channels, capability-detected — lifecycle
+  hooks in `~/.codex/hooks.json` give working/needs-input/finished/idle (trust
+  them once via `/hooks` inside Codex); a `sqwack-codex-exec` wrapper makes
+  non-interactive `codex exec` runs observable (including failures); and the
+  `notify` fallback reports turn completions with no trust step. An existing
+  `notify` program is chained, never replaced.
+- **Claude Desktop (chat app)**: no supported native event mechanism → reported
+  honestly; nothing is faked. See [docs/integrations.md](docs/integrations.md).
+
+Integrations bind per session: agents already running when hooks are installed
+won't report — start a new session/chat. Retention keeps the database small
+(events 14 days, sessions 30 days, automatic); `sqwackd prune [--all]` compacts
+on demand.
 
 Hook scripts always exit 0 and time out after 3s, so a stopped daemon can never
 block or slow your agents. Only session ids, project name/cwd, and short

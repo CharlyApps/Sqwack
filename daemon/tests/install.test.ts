@@ -8,6 +8,7 @@ const dir = mkdtempSync(join(tmpdir(), "sqwack-install-"));
 process.env.SQWACK_DATA_DIR = join(dir, "data");
 process.env.SQWACK_CLAUDE_SETTINGS = join(dir, "claude", "settings.json");
 process.env.SQWACK_CODEX_CONFIG = join(dir, "codex", "config.toml");
+process.env.SQWACK_CODEX_HOOKS = join(dir, "codex", "hooks.json");
 mkdirSync(join(dir, "claude"), { recursive: true });
 mkdirSync(join(dir, "codex"), { recursive: true });
 
@@ -56,6 +57,22 @@ test("codex installer chains an existing notify instead of overwriting", () => {
   const before = readFileSync(process.env.SQWACK_CODEX_CONFIG!, "utf8");
   installCodex();
   assert.equal(readFileSync(process.env.SQWACK_CODEX_CONFIG!, "utf8"), before, "second install is a no-op");
+});
+
+test("codex installer merges lifecycle hooks into existing hooks.json without clobbering", () => {
+  writeFileSync(
+    process.env.SQWACK_CODEX_HOOKS!,
+    JSON.stringify({ hooks: { PreToolUse: [{ matcher: "Bash", hooks: [{ type: "command", command: "/my/guard.py" }] }] } }),
+  );
+  installCodex();
+  const root = JSON.parse(readFileSync(process.env.SQWACK_CODEX_HOOKS!, "utf8"));
+  assert.ok(JSON.stringify(root.hooks.PreToolUse).includes("/my/guard.py"), "existing hook preserved");
+  for (const event of ["SessionStart", "UserPromptSubmit", "PermissionRequest", "Stop", "SessionEnd"]) {
+    assert.ok(JSON.stringify(root.hooks[event]).includes("sqwack-codex-hook"), `${event} hook added`);
+  }
+  const before = readFileSync(process.env.SQWACK_CODEX_HOOKS!, "utf8");
+  installCodex();
+  assert.equal(readFileSync(process.env.SQWACK_CODEX_HOOKS!, "utf8"), before, "second install is a no-op");
 });
 
 test("codex installer prepends notify before TOML tables when none exists", () => {

@@ -4,7 +4,7 @@ import type { Engine } from "../core.ts";
 import { Auth } from "../auth/auth.ts";
 import { validateEvent } from "../events/validate.ts";
 import { normalizeClaudeHook } from "../adapters/claude/adapter.ts";
-import { normalizeCodexNotify } from "../adapters/codex/adapter.ts";
+import { normalizeCodex } from "../adapters/codex/adapter.ts";
 import { integrationsStatus } from "../adapters/install.ts";
 import { killProcess } from "../processes/discovery.ts";
 import { VERSION } from "../config.ts";
@@ -83,7 +83,7 @@ export function startServer(engine: Engine) {
         const event =
           path === "/v1/hooks/claude"
             ? normalizeClaudeHook(raw, engine.config.machineId)
-            : normalizeCodexNotify(raw, engine.config.machineId);
+            : normalizeCodex(raw, engine.config.machineId);
         if (!event) return json(res, 200, { accepted: false, reason: "unmapped hook" });
         engine.ingest(event);
         return json(res, 202, { accepted: true });

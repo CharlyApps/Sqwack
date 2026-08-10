@@ -49,7 +49,8 @@ export function claudeCapability(installed: boolean): IntegrationCapability {
   return {
     integration: "claude-code",
     installed,
-    surfaces: ["cli"],
+    // settings.json hooks fire from every Claude Code surface (CLI, desktop app, IDE).
+    surfaces: ["cli", "desktop", "ide"],
     events: ["agent.started", "agent.working", "agent.needs_input", "agent.finished", "agent.idle"],
     confidence: "native",
   };
