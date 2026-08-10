@@ -74,10 +74,12 @@ export function installCodex(): { changed: string[]; notes: string[] } {
     `#!/bin/sh
 # Installed by sqwackd. Forwards Codex notify payloads to the local Sqwack daemon.
 # Codex passes the notification JSON as the final argument.
+PAYLOAD="\${1:-}"
+[ -z "\$PAYLOAD" ] && PAYLOAD="{}"
 curl -s -m 3 -X POST \\
   -H "Authorization: Bearer $(cat "${DATA_DIR}/admin-token")" \\
   -H "Content-Type: application/json" \\
-  --data-binary "\${1:-{}}" "http://127.0.0.1:${port}/v1/hooks/codex" > /dev/null 2>&1
+  --data-binary "\$PAYLOAD" "http://127.0.0.1:${port}/v1/hooks/codex" > /dev/null 2>&1
 exit 0
 `,
   );
@@ -88,15 +90,43 @@ exit 0
   if (existing.includes("sqwack-codex-notify")) {
     return { changed: [script], notes: ["Codex notify already installed — nothing changed"] };
   }
-  if (/^\s*notify\s*=/m.test(existing)) {
+
+  const notifyLine = existing.match(/^\s*notify\s*=\s*(\[.*\])\s*$/m);
+  if (notifyLine) {
+    // A notify program is already configured. Preserve it: install a chain
+    // wrapper that forwards to Sqwack AND then execs the original notifier.
+    let original: string[];
+    try {
+      original = JSON.parse(notifyLine[1]); // TOML string arrays parse as JSON
+    } catch {
+      return {
+        changed: [script],
+        notes: [
+          `~/.codex/config.toml has a 'notify' entry this installer cannot parse — not touching it.`,
+          `To forward Codex events to Sqwack yourself, chain in: ${script}`,
+        ],
+      };
+    }
+    const chain = writeHookScript(
+      "sqwack-codex-notify-chain",
+      `#!/bin/sh
+# Installed by sqwackd. Forwards Codex notify payloads to Sqwack, then invokes
+# the notifier that was previously configured so its behavior is preserved.
+"${script}" "\$@"
+exec ${original.map((a) => `"${a.replaceAll('"', '\\"')}"`).join(" ")} "\$@"
+`,
+    );
+    copyFileSync(configPath, configPath + ".sqwack-backup");
+    writeFileSync(configPath, existing.replace(notifyLine[0], `notify = ["${chain}"]`));
     return {
-      changed: [script],
+      changed: [script, chain, configPath],
       notes: [
-        `~/.codex/config.toml already defines 'notify' — not overwriting it.`,
-        `To forward Codex events to Sqwack, point it at: ${script}`,
+        `Existing notify preserved: it now runs via ${chain}`,
+        `Backup saved at ${configPath}.sqwack-backup`,
       ],
     };
   }
+
   if (existing) copyFileSync(configPath, configPath + ".sqwack-backup");
   // TOML top-level keys must appear before any [table] header, so prepend.
   writeFileSync(configPath, `notify = ["${script}"]\n${existing}`);

@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- The daemon speaks plain HTTP on the LAN / tailnet only; requests are
+	     bearer-token authenticated. ATS is relaxed because Tailscale IPs
+	     (100.x) do not qualify for NSAllowsLocalNetworking. -->
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsArbitraryLoads</key>
+		<true/>
+	</dict>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>Sqwack connects to the sqwackd daemon on your Mac over the local network.</string>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>com.sqwack.app</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>sqwack</string>
+			</array>
+		</dict>
+	</array>
+</dict>
+</plist>

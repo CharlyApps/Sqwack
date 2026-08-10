@@ -64,6 +64,21 @@ async function cmdStart(): Promise<void> {
   const engine = new Engine(store, config);
   const api = startServer(engine);
   log.info(`machine ${config.machineName} (${config.machineId})`);
+  if (config.network.tailscaleServe) {
+    // Expose the API inside the tailnet only (never Funnel). The daemon can
+    // stay bound to 127.0.0.1; tailscale serve proxies tailnet traffic to it.
+    const bin = tailscaleBin();
+    if (!bin) {
+      log.warn("network.tailscaleServe is on but Tailscale is not installed");
+    } else {
+      try {
+        execFileSync(bin, ["serve", "--bg", `--tcp=${config.network.port}`, `tcp://127.0.0.1:${config.network.port}`], { stdio: "ignore" });
+        log.info(`tailscale serve enabled on tailnet port ${config.network.port}`);
+      } catch (err) {
+        log.warn(`tailscale serve failed: ${String(err)}`);
+      }
+    }
+  }
   const shutdown = () => {
     log.info("shutting down");
     api.close();
