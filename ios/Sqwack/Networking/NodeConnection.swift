@@ -17,6 +17,7 @@ final class NodeConnection {
     private(set) var status: SqwackStatus = .quiet
     private(set) var sessions: [String: AgentSession] = [:]
     private(set) var processes: [DevProcess] = []
+    private(set) var usage: [ProviderUsage] = []
     private(set) var lastHeartbeat: Date?
 
     private var socket: URLSessionWebSocketTask?
@@ -88,11 +89,14 @@ final class NodeConnection {
             status = snapshot.status
             sessions = Dictionary(uniqueKeysWithValues: snapshot.sessions.map { ($0.id, $0) })
             processes = snapshot.processes
+            usage = snapshot.usage ?? []
             lastHeartbeat = .now
         case .sessionUpdated(let session):
             sessions[session.id] = session
         case .processesUpdated(let procs):
             processes = procs
+        case .usageUpdated(let newUsage):
+            usage = newUsage
         case .statusUpdated(let newStatus):
             status = newStatus
         case .heartbeat:

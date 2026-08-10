@@ -164,6 +164,7 @@ export function startServer(engine: Engine) {
     log.info("websocket client connected");
     // Snapshot first, always — a live broadcast must never beat the snapshot.
     ws.send(JSON.stringify({ type: "snapshot", data: engine.snapshot() }));
+    engine.refreshUsage(); // fresh usage follows as usage.updated if changed
     engine.refreshProcesses().catch(() => {}); // fresh process list follows as processes.updated
   });
 
@@ -178,6 +179,7 @@ export function startServer(engine: Engine) {
     setInterval(() => engine.heartbeat(), 30_000),
     setInterval(() => engine.sweep(), 60_000),
     setInterval(() => engine.refreshProcesses().catch((e) => log.debug("process refresh failed", String(e))), 20_000),
+    setInterval(() => { try { engine.refreshUsage(); } catch (e) { log.debug("usage refresh failed", String(e)); } }, 120_000),
     setInterval(() => engine.store.prune(engine.config.retentionDays.events, engine.config.retentionDays.sessions), 6 * 3600_000),
   ];
 

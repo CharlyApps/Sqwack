@@ -4,6 +4,7 @@ import type { Config } from "./config.ts";
 import { machineInfo } from "./config.ts";
 import { reduceEvent, sessionKey, computeStatus, attentionSessions, sweepStale } from "./sessions/reducer.ts";
 import { discoverProcesses } from "./processes/discovery.ts";
+import { collectUsage, type ProviderUsage } from "./usage/usage.ts";
 import { log } from "./log.ts";
 
 /** Central state machine: events in, session/status updates + broadcasts out. */
@@ -11,6 +12,7 @@ export class Engine {
   private listeners = new Set<(msg: ServerMessage) => void>();
   private lastStatus: SqwackStatus = "quiet";
   private processes: DevProcess[] = [];
+  private usage: ProviderUsage[] = [];
 
   public store: Store;
   public config: Config;
@@ -83,6 +85,14 @@ export class Engine {
     return this.processes;
   }
 
+  refreshUsage(): void {
+    const usage = collectUsage();
+    if (JSON.stringify(usage.map(u => ({...u, collectedAt: ""}))) !== JSON.stringify(this.usage.map(u => ({...u, collectedAt: ""})))) {
+      this.broadcast({ type: "usage.updated", data: usage });
+    }
+    this.usage = usage;
+  }
+
   snapshot(): Snapshot {
     const sessions = this.store.allSessions();
     return {
@@ -91,6 +101,7 @@ export class Engine {
       sessions: sessions.slice(0, 50),
       attention: attentionSessions(sessions),
       processes: this.processes,
+      usage: this.usage,
       connectedAt: new Date().toISOString(),
     };
   }

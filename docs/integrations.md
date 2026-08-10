@@ -78,6 +78,17 @@ Capability-tested notes (Codex 0.147, macOS): the desktop app shares
 `config.toml`/`hooks.json` with the CLI and reads them **only at startup** —
 restart the app after installing.
 
+## Usage / rate limits
+
+The Overview shows provider usage meters where a *local, native* data source
+exists — no reverse-engineered network calls:
+
+- **Codex**: rate-limit snapshots (used %, window, reset time, plan) that Codex
+  itself writes into its session rollout files. Refreshed every 2 minutes.
+- **Claude**: Claude Code exposes no account rate-limit data in any local file
+  (verified against transcripts) — so no meter is shown rather than a fake one.
+  The adapter slot exists (`daemon/src/usage/usage.ts`) for when it does.
+
 ## Desktop apps
 
 Per the design requirement: no UI scraping, no accessibility-API integration,

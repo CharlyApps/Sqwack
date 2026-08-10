@@ -67,6 +67,10 @@ final class SqwackStore {
             .sorted { ($0.port ?? 0) < ($1.port ?? 0) }
     }
 
+    var usage: [ProviderUsage] {
+        nodes.flatMap(\.usage).sorted { $0.provider < $1.provider }
+    }
+
     /// Global status = worst status across machines (attention > failure > working > quiet).
     var globalStatus: SqwackStatus {
         nodes.map(\.status).max() ?? .quiet

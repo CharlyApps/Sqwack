@@ -90,12 +90,29 @@ struct IntegrationCapability: Codable, Identifiable {
     var id: String { integration }
 }
 
+struct UsageWindow: Codable, Equatable, Identifiable {
+    var label: String
+    var usedPercent: Double
+    var resetsAt: Date?
+    var id: String { label }
+}
+
+struct ProviderUsage: Codable, Equatable, Identifiable {
+    var provider: String
+    var planType: String?
+    var windows: [UsageWindow]
+    var collectedAt: Date
+    var source: String
+    var id: String { provider }
+}
+
 struct Snapshot: Codable {
     var machine: Machine
     var status: SqwackStatus
     var sessions: [AgentSession]
     var attention: [AgentSession]
     var processes: [DevProcess]
+    var usage: [ProviderUsage]?
     var connectedAt: Date
 }
 
@@ -104,6 +121,7 @@ enum ServerMessage {
     case event
     case sessionUpdated(AgentSession)
     case processesUpdated([DevProcess])
+    case usageUpdated([ProviderUsage])
     case statusUpdated(SqwackStatus)
     case heartbeat
     case unknown
@@ -125,6 +143,9 @@ extension ServerMessage {
         case "processes.updated":
             guard let p = try? decoder.decode(Payload<[DevProcess]>.self, from: data) else { return .unknown }
             return .processesUpdated(p.data)
+        case "usage.updated":
+            guard let p = try? decoder.decode(Payload<[ProviderUsage]>.self, from: data) else { return .unknown }
+            return .usageUpdated(p.data)
         case "status.updated":
             guard let p = try? decoder.decode(Payload<SqwackStatus>.self, from: data) else { return .unknown }
             return .statusUpdated(p.data)

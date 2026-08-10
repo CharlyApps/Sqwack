@@ -14,6 +14,7 @@ struct OverviewView: View {
                 Spacer(minLength: 0)
                 HStack(alignment: .top, spacing: 32) {
                     ServicesStrip()
+                    if !store.usage.isEmpty { UsageStrip() }
                     if !store.attention.isEmpty { AttentionStrip() }
                 }
             }
@@ -195,6 +196,72 @@ private struct ServicesStrip: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+private struct UsageStrip: View {
+    @Environment(SqwackStore.self) private var store
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("USAGE")
+                .font(.headline)
+                .foregroundStyle(.secondary)
+            ForEach(store.usage) { usage in
+                HStack(spacing: 14) {
+                    Text(usage.provider.providerLabel)
+                        .font(.system(.body, design: .rounded, weight: .bold))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 76, alignment: .leading)
+                    ForEach(usage.windows) { window in
+                        UsageMeter(window: window)
+                    }
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+private struct UsageMeter: View {
+    let window: UsageWindow
+
+    private var barColor: Color {
+        window.usedPercent >= 90 ? .red : window.usedPercent >= 70 ? .amber : .green
+    }
+
+    private var resetLabel: String? {
+        guard let resets = window.resetsAt else { return nil }
+        let hours = Int(resets.timeIntervalSinceNow / 3600)
+        if hours <= 0 { return "resets soon" }
+        if hours < 24 { return "resets \(hours)h" }
+        return "resets \(hours / 24)d"
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 6) {
+                Text(window.label)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                Text(verbatim: "\(Int(window.usedPercent))%")
+                    .font(.caption.monospacedDigit().weight(.bold))
+                if let resetLabel {
+                    Text(resetLabel)
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                }
+            }
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    Capsule().fill(Color(.tertiarySystemFill))
+                    Capsule()
+                        .fill(barColor)
+                        .frame(width: max(4, geo.size.width * min(window.usedPercent, 100) / 100))
+                }
+            }
+            .frame(width: 110, height: 6)
+        }
     }
 }
 

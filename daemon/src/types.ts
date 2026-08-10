@@ -107,6 +107,7 @@ export interface Snapshot {
   sessions: AgentSession[];
   attention: AgentSession[];
   processes: DevProcess[];
+  usage: import("./usage/usage.ts").ProviderUsage[];
   connectedAt: string;
 }
 
@@ -115,6 +116,7 @@ export type ServerMessage =
   | { type: "event"; data: SqwackEvent }
   | { type: "session.updated"; data: AgentSession }
   | { type: "processes.updated"; data: DevProcess[] }
+  | { type: "usage.updated"; data: import("./usage/usage.ts").ProviderUsage[] }
   | { type: "status.updated"; data: SqwackStatus }
   | { type: "heartbeat"; timestamp: string };
 
