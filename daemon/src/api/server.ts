@@ -7,6 +7,7 @@ import { normalizeClaudeHook } from "../adapters/claude/adapter.ts";
 import { normalizeCodex } from "../adapters/codex/adapter.ts";
 import { integrationsStatus } from "../adapters/install.ts";
 import { killProcess } from "../processes/discovery.ts";
+import { readTranscript } from "../transcripts/transcripts.ts";
 import { VERSION } from "../config.ts";
 import { log } from "../log.ts";
 
@@ -98,6 +99,12 @@ export function startServer(engine: Engine) {
         if (q("machineId") && q("machineId") !== "all")
           sessions = sessions.filter((s) => s.machineId === q("machineId"));
         return json(res, 200, { sessions });
+      }
+
+      const transcriptMatch = path.match(/^\/v1\/sessions\/([^/]+)\/transcript$/);
+      if (method === "GET" && transcriptMatch) {
+        // Read straight from the provider's own files; nothing is persisted.
+        return json(res, 200, readTranscript(decodeURIComponent(transcriptMatch[1])));
       }
 
       const sessionMatch = path.match(/^\/v1\/sessions\/([^/]+)$/);

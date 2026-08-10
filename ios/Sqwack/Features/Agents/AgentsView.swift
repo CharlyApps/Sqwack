@@ -64,7 +64,7 @@ struct AgentsView: View {
 private struct SessionRow: View {
     @Environment(SqwackStore.self) private var store
     let session: AgentSession
-    @State private var showAck = false
+    @State private var showTranscript = false
 
     private var machineName: String {
         store.nodes.first { $0.machine?.id == session.machineId }?.machine?.name ?? session.machineId
@@ -127,8 +127,111 @@ private struct SessionRow: View {
                 .buttonStyle(.borderless)
                 .help("Acknowledge")
             }
+            Image(systemName: "chevron.right")
+                .font(.callout.weight(.semibold))
+                .foregroundStyle(.tertiary)
         }
         .padding(18)
         .background(RoundedRectangle(cornerRadius: 18).fill(Color(.secondarySystemBackground)))
+        .contentShape(RoundedRectangle(cornerRadius: 18))
+        .onTapGesture { showTranscript = true }
+        .sheet(isPresented: $showTranscript) {
+            TranscriptView(session: session)
+                .environment(store)
+        }
+    }
+}
+
+/// Read-only conversation viewer. The daemon streams the provider's own
+/// transcript files on demand — nothing is stored in Sqwack.
+struct TranscriptView: View {
+    @Environment(SqwackStore.self) private var store
+    @Environment(\.dismiss) private var dismiss
+    let session: AgentSession
+    @State private var transcript: Transcript?
+    @State private var loading = true
+
+    private var node: NodeConnection? {
+        store.nodes.first { $0.machine?.id == session.machineId } ?? store.nodes.first
+    }
+
+    var body: some View {
+        NavigationStack {
+            Group {
+                if loading {
+                    ProgressView("Loading conversation…")
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else if let transcript, transcript.available {
+                    ScrollViewReader { proxy in
+                        ScrollView {
+                            LazyVStack(alignment: .leading, spacing: 14) {
+                                ForEach(transcript.messages) { message in
+                                    MessageBubble(message: message)
+                                }
+                                Color.clear.frame(height: 1).id("bottom")
+                            }
+                            .padding(20)
+                        }
+                        .onAppear { proxy.scrollTo("bottom", anchor: .bottom) }
+                    }
+                } else {
+                    ContentUnavailableView(
+                        "No transcript available",
+                        systemImage: "text.bubble",
+                        description: Text("This provider's session file could not be found on the Mac (short-lived or non-interactive sessions may not keep one).")
+                    )
+                }
+            }
+            .navigationTitle("\(session.provider.capitalized) · \(session.projectName ?? session.source)")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Done") { dismiss() }
+                }
+                if let source = transcript?.source {
+                    ToolbarItem(placement: .bottomBar) {
+                        Text(source)
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
+                    }
+                }
+            }
+            .task {
+                transcript = await node?.transcript(sessionId: session.id)
+                loading = false
+            }
+        }
+        .presentationDetents([.large])
+    }
+}
+
+private struct MessageBubble: View {
+    let message: TranscriptMessage
+
+    private var isUser: Bool { message.role == "user" }
+
+    var body: some View {
+        HStack {
+            if isUser { Spacer(minLength: 60) }
+            VStack(alignment: .leading, spacing: 4) {
+                Text(isUser ? "You" : "Agent")
+                    .font(.caption2.weight(.bold))
+                    .foregroundStyle(isUser ? Color.blue : Color.secondary)
+                Text(message.text)
+                    .font(.callout)
+                    .textSelection(.enabled)
+                if let ts = message.timestamp {
+                    Text(ts.formatted(date: .omitted, time: .shortened))
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                }
+            }
+            .padding(12)
+            .background(
+                RoundedRectangle(cornerRadius: 14)
+                    .fill(isUser ? Color.blue.opacity(0.18) : Color(.secondarySystemBackground))
+            )
+            if !isUser { Spacer(minLength: 60) }
+        }
     }
 }

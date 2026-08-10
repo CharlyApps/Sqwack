@@ -9,8 +9,7 @@ struct OverviewView: View {
     var body: some View {
         TimelineView(.periodic(from: .now, by: 1)) { _ in
             ScrollView {
-                VStack(alignment: .leading, spacing: 24) {
-                    BrandHeader()
+                VStack(alignment: .leading, spacing: 22) {
                     StatusHeader()
                     AgentCardsRow()
                     HStack(alignment: .top, spacing: 20) {
@@ -19,26 +18,11 @@ struct OverviewView: View {
                         ActivityPanel()
                     }
                     if !store.usage.isEmpty { AccountUsageBand() }
-                    FooterBar()
                 }
                 .padding(28)
             }
         }
         .background(Color(.systemBackground))
-    }
-}
-
-private struct BrandHeader: View {
-    var body: some View {
-        HStack(spacing: 10) {
-            Image(systemName: "waveform.path.ecg")
-                .font(.title2.weight(.bold))
-                .foregroundStyle(.blue)
-            Text("SQWACK")
-                .font(.system(.title3, design: .rounded, weight: .heavy))
-                .kerning(1)
-            Spacer()
-        }
     }
 }
 
@@ -143,9 +127,9 @@ struct AgentCard: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack(spacing: 12) {
-                ProviderBadge(provider: session.provider)
+        VStack(alignment: .leading, spacing: 9) {
+            HStack(spacing: 10) {
+                ProviderBadge(provider: session.provider, size: 34)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(session.provider.providerLabel)
                         .font(.system(.headline, design: .rounded, weight: .bold))
@@ -158,7 +142,7 @@ struct AgentCard: View {
             HStack(spacing: 8) {
                 Circle().fill(session.state.color).frame(width: 9, height: 9)
                 Text(session.state.label)
-                    .font(.system(.title3, design: .rounded, weight: .heavy))
+                    .font(.system(.headline, design: .rounded, weight: .heavy))
                     .foregroundStyle(session.state.color)
             }
             Text(timeLabel)
@@ -168,10 +152,10 @@ struct AgentCard: View {
                 values: (session.activity ?? []).map(Double.init),
                 color: session.state.color
             )
-            .frame(height: 28)
+            .frame(height: 20)
         }
-        .padding(18)
-        .frame(width: 250, alignment: .leading)
+        .padding(14)
+        .frame(width: 240, alignment: .leading)
         .background(
             RoundedRectangle(cornerRadius: 20)
                 .fill(Color(.secondarySystemBackground))
@@ -249,29 +233,6 @@ private struct UsageCard: View {
     }
 }
 
-private struct FooterBar: View {
-    @Environment(SqwackStore.self) private var store
-
-    var body: some View {
-        HStack(spacing: 10) {
-            Image(systemName: "checkmark.shield")
-                .foregroundStyle(store.anyConnected ? .green : .orange)
-            Text("Connected to ").foregroundStyle(.secondary)
-                + Text(store.machineName).foregroundStyle(.blue)
-            Spacer()
-            Circle().fill(store.anyConnected ? .green : .red).frame(width: 8, height: 8)
-            Text(store.anyConnected ? "Connected" : "Disconnected")
-                .foregroundStyle(store.anyConnected ? .green : .red)
-            Spacer()
-            Text("Daemon v" + (store.nodes.first?.machine?.daemonVersion ?? "—"))
-                .foregroundStyle(.secondary)
-        }
-        .font(.callout)
-        .padding(.horizontal, 20)
-        .padding(.vertical, 12)
-        .background(RoundedRectangle(cornerRadius: 14).fill(Color(.secondarySystemBackground)))
-    }
-}
 
 struct UsageMeter: View {
     let window: UsageWindow
@@ -420,7 +381,7 @@ private struct ActivityPanel: View {
             if store.activity.isEmpty {
                 Text("No recent activity").foregroundStyle(.tertiary)
             }
-            ForEach(store.activity.prefix(5)) { item in
+            ForEach(store.activity.prefix(4)) { item in
                 HStack(spacing: 10) {
                     Circle().fill(dotColor(item.severity)).frame(width: 8, height: 8)
                     Text(item.message)
@@ -431,7 +392,7 @@ private struct ActivityPanel: View {
                         .font(.caption)
                         .foregroundStyle(.tertiary)
                 }
-                if item.id != store.activity.prefix(5).last?.id { Divider() }
+                if item.id != store.activity.prefix(4).last?.id { Divider() }
             }
         }
     }

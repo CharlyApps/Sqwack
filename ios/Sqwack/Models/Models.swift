@@ -149,6 +149,19 @@ struct ActivityItem: Codable, Identifiable, Equatable {
     var id: String { "\(timestamp.timeIntervalSince1970)-\(message)" }
 }
 
+struct TranscriptMessage: Codable, Identifiable, Equatable {
+    var role: String
+    var text: String
+    var timestamp: Date?
+    var id: String { "\(timestamp?.timeIntervalSince1970 ?? 0)-\(role)-\(text.hashValue)" }
+}
+
+struct Transcript: Codable, Equatable {
+    var available: Bool
+    var source: String?
+    var messages: [TranscriptMessage]
+}
+
 struct Snapshot: Codable {
     var machine: Machine
     var status: SqwackStatus

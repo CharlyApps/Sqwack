@@ -164,6 +164,12 @@ final class NodeConnection {
         _ = try? await request("/v1/sessions/\(escaped)/ack", method: "POST")
     }
 
+    func transcript(sessionId: String) async -> Transcript? {
+        let escaped = sessionId.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? sessionId
+        guard let data = try? await request("/v1/sessions/\(escaped)/transcript") else { return nil }
+        return try? JSONDecoder.sqwack.decode(Transcript.self, from: data)
+    }
+
     func integrations() async -> [IntegrationCapability] {
         struct Wrapper: Codable { var integrations: [IntegrationCapability] }
         guard let data = try? await request("/v1/integrations"),

@@ -112,6 +112,7 @@ interface SystemSnapshot {   // host machine stats + last ~10min history
 | `GET /v1/sessions` | yes | filters: `state`, `provider`, `project`, `machineId` (or `all`) |
 | `GET /v1/sessions/:id` | yes | one session |
 | `POST /v1/sessions/:id/ack` | yes | acknowledge (clears attention/failure hold) |
+| `GET /v1/sessions/:id/transcript` | yes | conversation read live from the provider's own files (never persisted by Sqwack) |
 | `GET /v1/processes` | yes | fresh discovery of listening dev processes |
 | `POST /v1/processes/:id/kill` | yes (rate-limited) | verify identity → SIGTERM → `{ outcome: "exited" \| "terminating" }`; `404` unknown id, `409` refused |
 | `GET /v1/integrations` | yes | `IntegrationCapability[]` |

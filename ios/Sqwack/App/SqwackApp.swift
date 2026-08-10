@@ -17,6 +17,27 @@ struct SqwackApp: App {
     }
 }
 
+/// Compact connection indicator pinned beside the tab selector.
+struct ConnectionChip: View {
+    @Environment(SqwackStore.self) private var store
+
+    var body: some View {
+        HStack(spacing: 7) {
+            Circle()
+                .fill(store.anyConnected ? .green : .red)
+                .frame(width: 8, height: 8)
+            Text(store.machineName.isEmpty ? "No daemon" : store.machineName)
+                .font(.caption.weight(.medium))
+                .foregroundStyle(.secondary)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 7)
+        .background(Capsule().fill(.ultraThinMaterial))
+        .padding(.trailing, 16)
+        .padding(.top, 4)
+    }
+}
+
 struct RootView: View {
     @Environment(SqwackStore.self) private var store
     @State private var selectedTab = ProcessInfo.processInfo.environment["SQWACK_TAB"] ?? "overview"
@@ -36,6 +57,7 @@ struct RootView: View {
                     selectedTab = tab
                 }
             }
+            .overlay(alignment: .topTrailing) { ConnectionChip() }
         } else {
             PairingView()
         }
