@@ -73,9 +73,13 @@ export function installCodex(): { changed: string[]; notes: string[] } {
     "sqwack-codex-notify",
     `#!/bin/sh
 # Installed by sqwackd. Forwards Codex notify payloads to the local Sqwack daemon.
-# Codex passes the notification JSON as the final argument.
-PAYLOAD="\${1:-}"
+# Codex passes the notification JSON as the final argument. Some notify
+# chainers prepend their own arguments, so take the LAST argument.
+for LAST in "\$@"; do :; done
+PAYLOAD="\${LAST:-}"
 [ -z "\$PAYLOAD" ] && PAYLOAD="{}"
+# Invocation log (timestamp + size only, never content) for sqwackd doctor.
+echo "\$(date -u +%Y-%m-%dT%H:%M:%SZ) invoked argc=\$# bytes=\${#PAYLOAD}" >> "${DATA_DIR}/logs/codex-notify.log" 2>/dev/null
 curl -s -m 3 -X POST \\
   -H "Authorization: Bearer $(cat "${DATA_DIR}/admin-token")" \\
   -H "Content-Type: application/json" \\

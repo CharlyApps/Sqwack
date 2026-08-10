@@ -52,6 +52,15 @@ Codex's notify channel does not expose rich lifecycle state on every surface,
 hence `derived` confidence. Do not expect `working` cards from every Codex
 version; turn completion is the reliable signal.
 
+Capability-tested notes (Codex 0.147, macOS):
+- Interactive sessions (desktop app and CLI) fire notify on turn completion. ✔
+- Non-interactive `codex exec` runs do **not** fire notify — they will not appear in Sqwack.
+- The desktop app reads `config.toml` only at startup: restart it after installing.
+- Codex Computer Use rewrites `notify` on app start, chaining previous notifiers
+  via `--previous-notify` — Sqwack's forwarder therefore takes the *last*
+  argument as the payload and survives being re-chained. Invocations are logged
+  (timestamp + size only) to `~/.sqwack/logs/codex-notify.log`.
+
 ## Desktop apps
 
 Per the design requirement: no UI scraping, no accessibility-API integration,
