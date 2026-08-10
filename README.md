@@ -58,6 +58,9 @@ Status                 quiet
 
 Everything lives in `~/.sqwack/` (config, SQLite DB, tokens, logs, hook scripts).
 `sqwackd doctor` diagnoses common problems; `sqwackd logs -f` follows the log.
+After changing `~/.sqwack/config.json`, apply it with `sqwackd restart` —
+restarts never affect pairing (device credentials are persisted in SQLite and
+the iPad reconnects automatically).
 
 ## Build & run the iPad app
 

@@ -184,6 +184,19 @@ function cmdSetup(): void {
   console.log("Uninstall with: sqwackd uninstall");
 }
 
+function cmdRestart(): void {
+  const uid = process.getuid?.();
+  try {
+    // -k kills the running instance; launchd starts it again immediately.
+    // Pairing is unaffected: device tokens live in SQLite, not in memory.
+    execFileSync("launchctl", ["kickstart", "-k", `gui/${uid}/com.sqwack.sqwackd`], { stdio: "pipe" });
+    console.log("sqwackd restarted.");
+  } catch {
+    console.error("LaunchAgent not loaded — run: sqwackd setup");
+    process.exit(1);
+  }
+}
+
 function cmdUninstall(): void {
   const uid = process.getuid?.();
   try { execFileSync("launchctl", ["bootout", `gui/${uid}/com.sqwack.sqwackd`], { stdio: "ignore" }); } catch { /* not loaded */ }
@@ -343,6 +356,7 @@ usage: sqwackd <command>
 
   start                       run the daemon in the foreground
   setup                       install + start as a LaunchAgent (auto-start at login)
+  restart                     restart the daemon (pairing and data are untouched)
   uninstall                   remove the LaunchAgent
   status                      one-glance daemon status
   pair                        generate a pairing code for the iPad app
@@ -358,6 +372,7 @@ usage: sqwackd <command>
 const commands: Record<string, () => void | Promise<void>> = {
   start: cmdStart,
   setup: cmdSetup,
+  restart: cmdRestart,
   uninstall: cmdUninstall,
   status: cmdStatus,
   pair: cmdPair,
