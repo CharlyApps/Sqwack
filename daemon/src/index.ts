@@ -15,6 +15,12 @@ import { installClaude, installCodex, integrationsStatus } from "./adapters/inst
 
 const [, , command = "help", ...args] = process.argv;
 
+// Piping CLI output (e.g. `sqwackd status | head`) must not crash with EPIPE.
+process.stdout.on("error", (err: NodeJS.ErrnoException) => {
+  if (err.code === "EPIPE") process.exit(0);
+  throw err;
+});
+
 function api(path: string, init?: RequestInit): Promise<Response> {
   const config = loadConfig();
   return fetch(`http://127.0.0.1:${config.network.port}${path}`, {
