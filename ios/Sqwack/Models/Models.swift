@@ -98,6 +98,7 @@ struct UsageWindow: Codable, Equatable, Identifiable {
     var label: String
     var usedPercent: Double
     var resetsAt: Date?
+    var detail: String?
     var id: String { label }
 }
 

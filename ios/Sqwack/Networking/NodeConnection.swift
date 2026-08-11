@@ -22,6 +22,7 @@ final class NodeConnection {
     private(set) var topProcesses: [ProcessMetric] = []
     private(set) var activity: [ActivityItem] = []
     private(set) var lastHeartbeat: Date?
+    private(set) var lastError: String?
 
     private var socket: URLSessionWebSocketTask?
     private var reconnectAttempt = 0
@@ -52,7 +53,12 @@ final class NodeConnection {
     }
 
     private func openSocket() {
-        guard !closed, let token else { return }
+        guard !closed else { return }
+        guard let token else {
+            lastError = "WebSocket \(endpoint.absoluteString): missing stored token"
+            connectionState = .error
+            return
+        }
         connectionState = .connecting
         var components = URLComponents(url: endpoint.appending(path: "/v1/ws"), resolvingAgainstBaseURL: false)!
         components.scheme = endpoint.scheme == "https" ? "wss" : "ws"
@@ -78,8 +84,8 @@ final class NodeConnection {
                     Task { @MainActor in self.handle(ServerMessage.decode(data)) }
                 }
                 self.receive(on: task)
-            case .failure:
-                Task { @MainActor in self.scheduleReconnect() }
+            case .failure(let error):
+                Task { @MainActor in self.scheduleReconnect(error) }
             }
         }
     }
@@ -88,6 +94,7 @@ final class NodeConnection {
     private func handle(_ message: ServerMessage) {
         switch message {
         case .snapshot(let snapshot):
+            lastError = nil
             connectionState = .connected
             reconnectAttempt = 0
             machine = snapshot.machine
@@ -100,25 +107,33 @@ final class NodeConnection {
             activity = snapshot.activity ?? []
             lastHeartbeat = .now
         case .sessionUpdated(let session):
+            lastError = nil
             sessions[session.id] = session
         case .processesUpdated(let procs):
+            lastError = nil
             processes = procs
         case .usageUpdated(let newUsage):
+            lastError = nil
             applyUsage(newUsage)
         case .systemUpdated(let newSystem):
+            lastError = nil
             system = newSystem
         case .statusUpdated(let newStatus):
+            lastError = nil
             status = newStatus
         case .heartbeat:
             lastHeartbeat = .now
-        case .event, .unknown:
+        case .unknown:
+            lastError = "WebSocket: daemon sent an unknown or undecodable message"
+        case .event:
             break
         }
     }
 
     @MainActor
-    private func scheduleReconnect() {
+    private func scheduleReconnect(_ error: Error? = nil) {
         guard !closed else { return }
+        if let error { reportError("WebSocket", error) }
         connectionState = sessions.isEmpty ? .error : .disconnected
         socket?.cancel()
         socket = nil
@@ -129,6 +144,21 @@ final class NodeConnection {
             guard !closed else { return }
             openSocket() // server re-sends a full snapshot on connect: state refreshes automatically
         }
+    }
+
+    @MainActor
+    func clearError() {
+        lastError = nil
+    }
+
+    @MainActor
+    private func reportError(_ context: String, _ error: Error) {
+        lastError = "\(context): \(error.localizedDescription)"
+        lastHeartbeat = .now
+    }
+
+    private func decodeError(_ context: String) -> NSError {
+        NSError(domain: "sqwack", code: 0, userInfo: [NSLocalizedDescriptionKey: "\(context) response could not be decoded"])
     }
 
     // MARK: - REST commands
@@ -151,25 +181,45 @@ final class NodeConnection {
     }
 
     func refreshSnapshot() async {
-        guard let data = try? await request("/v1/snapshot") else { return }
-        if let snapshot = try? JSONDecoder.sqwack.decode(Snapshot.self, from: data) {
+        do {
+            let data = try await request("/v1/snapshot")
+            guard let snapshot = try? JSONDecoder.sqwack.decode(Snapshot.self, from: data) else {
+                await reportError("GET /v1/snapshot", decodeError("snapshot"))
+                return
+            }
             await handle(.snapshot(snapshot))
+        } catch {
+            await reportError("GET /v1/snapshot", error)
         }
     }
 
     func refreshProcesses() async {
         struct Wrapper: Codable { var processes: [DevProcess] }
-        guard let data = try? await request("/v1/processes"),
-              let wrapper = try? JSONDecoder.sqwack.decode(Wrapper.self, from: data) else { return }
-        await handle(.processesUpdated(wrapper.processes))
+        do {
+            let data = try await request("/v1/processes")
+            guard let wrapper = try? JSONDecoder.sqwack.decode(Wrapper.self, from: data) else {
+                await reportError("GET /v1/processes", decodeError("processes"))
+                return
+            }
+            await handle(.processesUpdated(wrapper.processes))
+        } catch {
+            await reportError("GET /v1/processes", error)
+        }
     }
 
     func refreshUsage(provider: String? = nil) async {
         struct Wrapper: Codable { var usage: [ProviderUsage] }
         let body = try? JSONEncoder().encode(provider.map { ["provider": $0] } ?? [:])
-        guard let data = try? await request("/v1/usage/refresh", method: "POST", body: body),
-              let wrapper = try? JSONDecoder.sqwack.decode(Wrapper.self, from: data) else { return }
-        await handle(.usageUpdated(wrapper.usage))
+        do {
+            let data = try await request("/v1/usage/refresh", method: "POST", body: body)
+            guard let wrapper = try? JSONDecoder.sqwack.decode(Wrapper.self, from: data) else {
+                await reportError("POST /v1/usage/refresh", decodeError("usage"))
+                return
+            }
+            await handle(.usageUpdated(wrapper.usage))
+        } catch {
+            await reportError("POST /v1/usage/refresh", error)
+        }
     }
 
     func kill(process: DevProcess) async throws {
@@ -178,20 +228,41 @@ final class NodeConnection {
 
     func acknowledge(session sessionId: String) async {
         let escaped = pathComponent(sessionId)
-        _ = try? await request("/v1/sessions/\(escaped)/ack", method: "POST")
+        do {
+            _ = try await request("/v1/sessions/\(escaped)/ack", method: "POST")
+        } catch {
+            await reportError("POST /v1/sessions/\(escaped)/ack", error)
+        }
     }
 
     func transcript(sessionId: String) async -> Transcript? {
         let escaped = pathComponent(sessionId)
-        guard let data = try? await request("/v1/sessions/\(escaped)/transcript") else { return nil }
-        return try? JSONDecoder.sqwack.decode(Transcript.self, from: data)
+        do {
+            let data = try await request("/v1/sessions/\(escaped)/transcript")
+            guard let transcript = try? JSONDecoder.sqwack.decode(Transcript.self, from: data) else {
+                await reportError("GET /v1/sessions/\(escaped)/transcript", decodeError("transcript"))
+                return nil
+            }
+            return transcript
+        } catch {
+            await reportError("GET /v1/sessions/\(escaped)/transcript", error)
+            return nil
+        }
     }
 
     func integrations() async -> [IntegrationCapability] {
         struct Wrapper: Codable { var integrations: [IntegrationCapability] }
-        guard let data = try? await request("/v1/integrations"),
-              let wrapper = try? JSONDecoder.sqwack.decode(Wrapper.self, from: data) else { return [] }
-        return wrapper.integrations
+        do {
+            let data = try await request("/v1/integrations")
+            guard let wrapper = try? JSONDecoder.sqwack.decode(Wrapper.self, from: data) else {
+                await reportError("GET /v1/integrations", decodeError("integrations"))
+                return []
+            }
+            return wrapper.integrations
+        } catch {
+            await reportError("GET /v1/integrations", error)
+            return []
+        }
     }
 
     // MARK: - Pairing (static: runs before a connection exists)
@@ -224,8 +295,14 @@ final class NodeConnection {
 
     private func applyUsage(_ newUsage: [ProviderUsage]) {
         guard !newUsage.isEmpty else { return }
-        usage = newUsage
-        if let data = try? JSONEncoder().encode(newUsage) {
+        for item in newUsage {
+            if let index = usage.firstIndex(where: { $0.provider == item.provider }) {
+                usage[index] = item
+            } else {
+                usage.append(item)
+            }
+        }
+        if let data = try? JSONEncoder().encode(usage) {
             UserDefaults.standard.set(data, forKey: Self.usageCachePrefix + credentialRef)
         }
     }

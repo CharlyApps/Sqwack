@@ -1,9 +1,9 @@
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, chmodSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { collectCodexUsage } from "../src/usage/usage.ts";
+import { collectCodexBarUsage, collectCodexUsage, collectUsage } from "../src/usage/usage.ts";
 
 const root = mkdtempSync(join(tmpdir(), "sqwack-usage-"));
 after(() => rmSync(root, { recursive: true, force: true }));
@@ -61,4 +61,63 @@ test("falls back to recent rollout with rate limits", () => {
   writeSession([JSON.stringify({ type: "event_msg", payload: { type: "agent_message" } })], "rollout-new.jsonl");
   const usage = collectCodexUsage(root)!;
   assert.equal(usage.windows[0].usedPercent, 9);
+});
+
+test("parses CodexBar CLI usage snapshot", async () => {
+  const bin = join(root, "codexbar-fake");
+  writeFileSync(bin, `#!/bin/sh
+cat <<JSON
+[
+  {
+    "provider": "$3",
+    "source": "$3-cli",
+    "usage": {
+      "loginMethod": "prolite",
+      "secondary": {
+        "resetDescription": "\\$6.24 (Paid: \\$6.24 / Granted: \\$0.00)",
+        "resetsAt": "2026-08-17T23:59:02Z",
+        "usedPercent": 4,
+        "windowMinutes": 10080
+      },
+      "updatedAt": "2026-08-11T03:23:03Z"
+    }
+  }
+]
+JSON
+`);
+  chmodSync(bin, 0o755);
+  const usage = (await collectCodexBarUsage("claude", bin))!;
+  assert.equal(usage.provider, "claude");
+  assert.equal(usage.source, "claude-cli");
+  assert.equal(usage.planType, "prolite");
+  assert.deepEqual(usage.windows[0], {
+    label: "week",
+    usedPercent: 4,
+    resetsAt: "2026-08-17T23:59:02Z",
+    detail: "$6.24 (Paid: $6.24 / Granted: $0.00)",
+  });
+});
+
+test("default usage refresh does not call Claude network endpoint", async () => {
+  const originalFetch = globalThis.fetch;
+  process.env.SQWACK_CODEXBAR_DISABLE = "1";
+  globalThis.fetch = (() => { throw new Error("fetch should not run"); }) as typeof fetch;
+  try {
+    await collectUsage();
+  } finally {
+    delete process.env.SQWACK_CODEXBAR_DISABLE;
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("claude usage refresh does not touch oauth network", async () => {
+  const originalFetch = globalThis.fetch;
+  process.env.SQWACK_CODEXBAR_DISABLE = "1";
+  globalThis.fetch = (() => { throw new Error("fetch should not run"); }) as typeof fetch;
+  try {
+    assert.deepEqual(await collectUsage("claude"), []);
+  } finally {
+    delete process.env.SQWACK_CODEXBAR_DISABLE;
+    globalThis.fetch = originalFetch;
+  }
 });

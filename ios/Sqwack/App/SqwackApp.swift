@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 @main
 struct SqwackApp: App {
@@ -45,17 +46,18 @@ struct RootView: View {
         if store.isPaired {
             VStack(spacing: 0) {
                 AppChrome(selectedTab: $selectedTab)
+                if let error = store.lastError {
+                    DiagnosticBanner(message: error) {
+                        store.clearError()
+                    }
+                    .padding(.horizontal, 28)
+                    .padding(.bottom, 8)
+                }
                 selectedView
                 AppFooter()
             }
             .background(Color.consoleBackground)
             .onAppear { store.connectAll() }
-            .task {
-                while !Task.isCancelled {
-                    await store.refreshProcesses()
-                    try? await Task.sleep(for: .seconds(8))
-                }
-            }
             .onOpenURL { url in
                 // sqwack://tab/<overview|agents|development|settings>
                 if url.host() == "tab", let tab = url.pathComponents.dropFirst().first {
@@ -74,6 +76,48 @@ struct RootView: View {
         case "settings": SettingsView()
         default: OverviewView()
         }
+    }
+}
+
+private struct DiagnosticBanner: View {
+    let message: String
+    let onDismiss: () -> Void
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .foregroundStyle(.orange)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Diagnostics")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.primary)
+                Text(message)
+                    .font(.caption.monospaced())
+                    .foregroundStyle(.secondary)
+                    .lineLimit(3)
+                    .textSelection(.enabled)
+            }
+            Spacer(minLength: 12)
+            Button {
+                UIPasteboard.general.string = message
+            } label: {
+                Image(systemName: "doc.on.doc")
+                    .frame(width: 32, height: 32)
+            }
+            .buttonStyle(.plain)
+            Button(action: onDismiss) {
+                Image(systemName: "xmark")
+                    .frame(width: 32, height: 32)
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .background(
+            RoundedRectangle(cornerRadius: 12)
+                .fill(Color.consolePanelRaised)
+                .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Color.orange.opacity(0.35)))
+        )
     }
 }
 
@@ -130,11 +174,31 @@ private struct AppChrome: View {
                     .foregroundStyle(.secondary)
                 }
                 Menu {
-                    ConnectionChip()
+                    Button("Refresh All", systemImage: "arrow.clockwise") {
+                        Task { await store.refreshAll() }
+                    }
+                    Button("Refresh Agents", systemImage: "person.2") {
+                        Task { await store.refreshAgents() }
+                    }
+                    Button("Refresh Services", systemImage: "terminal") {
+                        Task { await store.refreshProcessesOnly() }
+                    }
+                    Button("Refresh Account Usage", systemImage: "chart.bar") {
+                        Task { await store.refreshUsage() }
+                    }
+                    Button("Refresh Codex Usage", systemImage: "cube.fill") {
+                        Task { await store.refreshUsage(provider: "codex") }
+                    }
+                    Button("Refresh Claude Usage", systemImage: "sparkles") {
+                        Task { await store.refreshUsage(provider: "claude") }
+                    }
+                    Button("Refresh DeepSeek Balance", systemImage: "creditcard") {
+                        Task { await store.refreshUsage(provider: "deepseek") }
+                    }
                     Divider()
                     Text(store.anyConnected ? "Connected" : "Disconnected")
                 } label: {
-                    Image(systemName: "list.bullet.circle")
+                    Image(systemName: "arrow.clockwise.circle")
                         .font(.title2.weight(.medium))
                         .foregroundStyle(.primary)
                         .frame(width: 44, height: 44)

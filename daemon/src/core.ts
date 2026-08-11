@@ -4,7 +4,8 @@ import type { Config } from "./config.ts";
 import { machineInfo } from "./config.ts";
 import { reduceEvent, sessionKey, computeStatus, attentionSessions, sweepStale } from "./sessions/reducer.ts";
 import { discoverProcesses } from "./processes/discovery.ts";
-import { collectUsage, type ProviderUsage, type UsageProvider } from "./usage/usage.ts";
+import { discoverClaudeProcessSessions } from "./adapters/claude/processes.ts";
+import { collectUsage, USAGE_PROVIDERS, type ProviderUsage, type UsageProvider } from "./usage/usage.ts";
 import { collectSystemStats, topProcesses, type ProcessMetric } from "./system/stats.ts";
 import type { ActivityItem, SystemSnapshot } from "./types.ts";
 import { log } from "./log.ts";
@@ -74,16 +75,17 @@ export class Engine {
     return updated;
   }
 
-  private refreshStatus(): void {
+  private refreshStatus(broadcast = true): void {
     const status = computeStatus(this.store.allSessions());
     if (status !== this.lastStatus) {
       this.lastStatus = status;
-      this.broadcast({ type: "status.updated", data: status });
+      if (broadcast) this.broadcast({ type: "status.updated", data: status });
     }
   }
 
-  async refreshProcesses(): Promise<DevProcess[]> {
+  async refreshProcesses(broadcast = true): Promise<DevProcess[]> {
     const discovered = await discoverProcesses(this.config.machineId, this.config.processFilters.excludeCommands);
+    await this.refreshClaudeProcessSessions(broadcast);
     // Enrich with per-process cpu/mem from the latest system sample.
     const livePids = new Set(discovered.map((p) => p.pid));
     for (const pid of this.serviceCpuHistory.keys()) if (!livePids.has(pid)) this.serviceCpuHistory.delete(pid);
@@ -100,8 +102,43 @@ export class Engine {
       }
     }
     this.processes = discovered;
-    this.broadcast({ type: "processes.updated", data: this.processes });
+    if (broadcast) this.broadcast({ type: "processes.updated", data: this.processes });
     return this.processes;
+  }
+
+  private async refreshClaudeProcessSessions(broadcast = true): Promise<void> {
+    const sessions = this.store.allSessions();
+    const hookSessions = sessions.filter((s) =>
+      s.provider === "claude" && s.source !== "claude-process" && s.cwd && s.startedAt
+    );
+    const live = (await discoverClaudeProcessSessions(this.config.machineId)).filter((proc) =>
+      !hookSessions.some((hook) =>
+        hook.cwd === proc.cwd
+        && hook.startedAt
+        && proc.startedAt
+        && Math.abs(Date.parse(hook.startedAt) - Date.parse(proc.startedAt)) < 5 * 60_000
+      )
+    );
+    const liveIds = new Set(live.map((s) => s.id));
+    for (const session of live) {
+      const existing = this.store.getSession(session.id);
+      this.store.upsertSession(session);
+      if (broadcast && (!existing || existing.state !== "working")) {
+        this.broadcast({ type: "session.updated", data: session });
+      }
+    }
+    for (const session of sessions) {
+      if (session.source !== "claude-process" || liveIds.has(session.id) || session.state !== "working") continue;
+      const idle = {
+        ...session,
+        state: "idle" as const,
+        summary: "Claude Code process exited",
+        updatedAt: new Date().toISOString(),
+      };
+      this.store.upsertSession(idle);
+      if (broadcast) this.broadcast({ type: "session.updated", data: idle });
+    }
+    this.refreshStatus(broadcast);
   }
 
   async refreshSystem(): Promise<void> {
@@ -163,6 +200,10 @@ export class Engine {
   }
 
   private async refreshUsageNow(provider?: UsageProvider): Promise<void> {
+    if (!provider) {
+      await Promise.all(USAGE_PROVIDERS.map((p) => this.refreshUsageNow(p)));
+      return;
+    }
     const fresh = await collectUsage(provider);
     const cutoff = Date.now() - 15 * 60_000;
     // ponytail: short stale window smooths transient 429/offline reads; add per-provider error state if users need diagnostics.

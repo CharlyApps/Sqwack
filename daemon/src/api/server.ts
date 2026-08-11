@@ -8,6 +8,7 @@ import { normalizeCodex } from "../adapters/codex/adapter.ts";
 import { integrationsStatus } from "../adapters/install.ts";
 import { killProcess } from "../processes/discovery.ts";
 import { readTranscript } from "../transcripts/transcripts.ts";
+import { USAGE_PROVIDERS, type UsageProvider } from "../usage/usage.ts";
 import { VERSION } from "../config.ts";
 import { log } from "../log.ts";
 
@@ -125,10 +126,10 @@ export function startServer(engine: Engine) {
 
       if (method === "POST" && path === "/v1/usage/refresh") {
         const body = (await readBody(req)) as { provider?: string };
-        if (body.provider && body.provider !== "codex" && body.provider !== "claude") {
+        if (body.provider && !USAGE_PROVIDERS.includes(body.provider as UsageProvider)) {
           return json(res, 400, { error: "unknown provider" });
         }
-        const provider = body.provider as "codex" | "claude" | undefined;
+        const provider = body.provider as UsageProvider | undefined;
         await engine.refreshUsage(provider);
         return json(res, 200, { usage: engine.snapshot().usage });
       }
@@ -183,8 +184,12 @@ export function startServer(engine: Engine) {
     log.info("websocket client connected");
     // Snapshot first, always — a live broadcast must never beat the snapshot.
     ws.send(JSON.stringify({ type: "snapshot", data: engine.snapshot() }));
+    engine.refreshProcesses(false)
+      .then(() => {
+        if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "snapshot", data: engine.snapshot() }));
+      })
+      .catch(() => {});
     engine.refreshSystem().catch(() => {});
-    engine.refreshProcesses().catch(() => {}); // fresh process list follows as processes.updated
   });
 
   const unsubscribe = engine.onBroadcast((msg) => {

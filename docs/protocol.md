@@ -79,9 +79,9 @@ interface DevProcess {
 
 ```ts
 interface ProviderUsage {
-  provider: "codex" | "claude";
+  provider: "codex" | "claude" | "deepseek";
   planType?: string;
-  windows: { label: string; usedPercent: number; resetsAt?: string }[]; // "5h", "week"
+  windows: { label: string; usedPercent: number; resetsAt?: string; detail?: string }[]; // "5h", "week", balance text
   collectedAt: string;
   source: string;
 }
@@ -114,7 +114,7 @@ interface SystemSnapshot {   // host machine stats + last ~10min history
 | `POST /v1/sessions/:id/ack` | yes | acknowledge (clears attention/failure hold) |
 | `GET /v1/sessions/:id/transcript` | yes | conversation read live from the provider's own files (never persisted by Sqwack) |
 | `GET /v1/processes` | yes | fresh discovery of listening dev processes |
-| `POST /v1/usage/refresh` | yes | refresh provider usage on demand; optional body `{ provider: "codex" \| "claude" }` → `{ usage }` |
+| `POST /v1/usage/refresh` | yes | refresh provider usage on demand; optional body `{ provider: "codex" \| "claude" \| "deepseek" }` → `{ usage }` |
 | `POST /v1/processes/:id/kill` | yes (rate-limited) | verify identity → SIGTERM → `{ outcome: "exited" \| "terminating" }`; `404` unknown id, `409` refused |
 | `GET /v1/integrations` | yes | `IntegrationCapability[]` |
 | `GET /v1/devices` | yes | paired devices |

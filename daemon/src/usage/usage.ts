@@ -1,15 +1,18 @@
-import { readdirSync, statSync, openSync, readSync, closeSync } from "node:fs";
+import { execFile } from "node:child_process";
+import { readdirSync, statSync, openSync, readSync, closeSync, existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { promisify } from "node:util";
 
 export interface UsageWindow {
   label: string; // "5h" | "week"
   usedPercent: number;
   resetsAt?: string;
+  detail?: string;
 }
 
 export interface ProviderUsage {
-  provider: "codex" | "claude";
+  provider: "codex" | "claude" | "deepseek";
   planType?: string;
   windows: UsageWindow[];
   collectedAt: string;
@@ -19,7 +22,15 @@ export interface ProviderUsage {
 export type UsageProvider = ProviderUsage["provider"];
 
 const CODEX_SESSIONS = () => process.env.SQWACK_CODEX_SESSIONS ?? join(homedir(), ".codex", "sessions");
-let claudeUsageCooldownUntil = 0;
+const CODEXBAR_BIN = () => process.env.SQWACK_CODEXBAR_BIN;
+const execFileAsync = promisify(execFile);
+
+const CODEXBAR_CANDIDATES = [
+  "/Applications/CodexBar.app/Contents/Helpers/CodexBarCLI",
+  "/opt/homebrew/bin/codexbar",
+  "/usr/local/bin/codexbar",
+];
+export const USAGE_PROVIDERS = ["codex", "claude", "deepseek"] as const satisfies readonly UsageProvider[];
 
 /** Recent files under sessions/YYYY/MM/DD/, newest first, without walking old history. */
 function recentCodexSessions(root: string, limit = 25): string[] {
@@ -76,6 +87,68 @@ export function collectCodexUsage(root = CODEX_SESSIONS()): ProviderUsage | unde
   return undefined;
 }
 
+export async function collectCodexBarUsage(provider: UsageProvider = "codex", bin = findCodexBarBin()): Promise<ProviderUsage | undefined> {
+  if (!bin || process.env.SQWACK_CODEXBAR_DISABLE === "1") return undefined;
+  let raw = "";
+  try {
+    const source = provider === "deepseek" ? "auto" : "cli";
+    const result = await execFileAsync(bin, ["usage", "--provider", provider, "--source", source, "--format", "json"], {
+      encoding: "utf8",
+      timeout: 30_000,
+    });
+    raw = result.stdout;
+  } catch {
+    return undefined;
+  }
+  const rows = parseCodexBarJson(raw);
+  const row = rows.find((item) => item?.provider === provider && item?.usage);
+  if (!row) return undefined;
+
+  const usage = row.usage as Record<string, unknown>;
+  const windows: UsageWindow[] = [];
+  for (const key of ["primary", "secondary", "tertiary"]) {
+    const window = usage[key] as Record<string, unknown> | null | undefined;
+    if (!window || typeof window.usedPercent !== "number") continue;
+    windows.push({
+      label: typeof window.windowMinutes === "number" ? windowLabel(window.windowMinutes) : key,
+      usedPercent: window.usedPercent,
+      resetsAt: typeof window.resetsAt === "string" ? window.resetsAt : undefined,
+      detail: typeof window.resetDescription === "string" ? window.resetDescription : undefined,
+    });
+  }
+  if (windows.length === 0) return undefined;
+  return {
+    provider,
+    planType: typeof usage.loginMethod === "string" ? usage.loginMethod : undefined,
+    windows,
+    collectedAt: typeof usage.updatedAt === "string" ? usage.updatedAt : new Date().toISOString(),
+    source: typeof row.source === "string" ? row.source : `codexbar-${provider}`,
+  };
+}
+
+function findCodexBarBin(): string | undefined {
+  const configured = CODEXBAR_BIN();
+  if (configured) return existsSync(configured) ? configured : undefined;
+  return CODEXBAR_CANDIDATES.find((path) => existsSync(path));
+}
+
+function parseCodexBarJson(raw: string): Array<Record<string, unknown>> {
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed as Array<Record<string, unknown>> : [];
+  } catch {
+    const start = raw.indexOf("[");
+    const end = raw.lastIndexOf("]");
+    if (start === -1 || end <= start) return [];
+    try {
+      const parsed = JSON.parse(raw.slice(start, end + 1));
+      return Array.isArray(parsed) ? parsed as Array<Record<string, unknown>> : [];
+    } catch {
+      return [];
+    }
+  }
+}
+
 function collectCodexUsageFromFile(file: string): ProviderUsage | undefined {
   const tail = tailOf(file);
   const index = tail.lastIndexOf('"rate_limits"');
@@ -123,61 +196,19 @@ function findKey(obj: unknown, key: string): unknown {
   return undefined;
 }
 
-/**
- * Claude usage comes from the same OAuth usage endpoint Claude Code's /usage
- * panel uses, authenticated with the token Claude Code already keeps in the
- * macOS Keychain. The token is read at call time, never persisted, never
- * logged, and never leaves this machine — only percentages go to the iPad.
- */
-export async function collectClaudeUsage(): Promise<ProviderUsage | undefined> {
-  if (Date.now() < claudeUsageCooldownUntil) return undefined;
-  let token: string | undefined;
-  try {
-    const { execFileSync } = await import("node:child_process");
-    const raw = execFileSync("security", ["find-generic-password", "-s", "Claude Code-credentials", "-w"], {
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "ignore"],
-    });
-    token = (JSON.parse(raw) as { claudeAiOauth?: { accessToken?: string } }).claudeAiOauth?.accessToken;
-  } catch {
-    return undefined; // no keychain entry / access denied: no meter, no noise
-  }
-  if (!token) return undefined;
-  try {
-    const res = await fetch("https://api.anthropic.com/api/oauth/usage", {
-      headers: { Authorization: `Bearer ${token}`, "anthropic-beta": "oauth-2025-04-20", "Content-Type": "application/json" },
-      signal: AbortSignal.timeout(10_000),
-    });
-    // ponytail: fixed cooldown is enough for 429s; expose provider error state if users need exact diagnostics.
-    if (res.status === 429) claudeUsageCooldownUntil = Date.now() + 30 * 60_000;
-    if (!res.ok) return undefined;
-    const body = (await res.json()) as Record<string, { utilization?: number; resets_at?: string | null } | null>;
-    const windows: UsageWindow[] = [];
-    for (const [key, label] of [["five_hour", "5h"], ["seven_day", "week"], ["seven_day_opus", "opus wk"]] as const) {
-      const w = body[key];
-      if (w && typeof w.utilization === "number") {
-        windows.push({
-          label,
-          usedPercent: Math.round(w.utilization * 10) / 10,
-          resetsAt: w.resets_at ?? undefined,
-        });
-      }
-    }
-    if (windows.length === 0) return undefined;
-    return { provider: "claude", windows, collectedAt: new Date().toISOString(), source: "claude-oauth" };
-  } catch {
-    return undefined; // offline or endpoint changed: show nothing rather than stale fakes
-  }
-}
-
 /** All providers, best-effort each; a failing provider simply has no entry. */
 export async function collectUsage(provider?: UsageProvider): Promise<ProviderUsage[]> {
-  const usage: ProviderUsage[] = [];
-  const [codex, claude] = await Promise.all([
-    provider === "claude" ? undefined : Promise.resolve(collectCodexUsage()),
-    provider === "codex" ? undefined : collectClaudeUsage(),
-  ]);
-  if (claude) usage.push(claude);
-  if (codex) usage.push(codex);
+  // Claude Code owns its OAuth token lifecycle; sqwackd must not read Keychain
+  // or refresh Claude tokens itself. CodexBar CLI-source usage is the safe bridge.
+  if (provider) {
+    const usage = await collectCodexBarUsage(provider) ?? (provider === "codex" ? collectCodexUsage() : undefined);
+    return usage ? [usage] : [];
+  }
+  const [codex, claude, deepseek] = await Promise.all(USAGE_PROVIDERS.map((p) => collectCodexBarUsage(p)));
+  const usage = [
+    codex ?? collectCodexUsage(),
+    claude,
+    deepseek,
+  ].filter((item): item is ProviderUsage => Boolean(item));
   return usage;
 }

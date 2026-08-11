@@ -43,7 +43,15 @@ AI agents + dev services
 - Node.js 24 or newer
 - Xcode 16 or newer
 - iPadOS 18 or newer
+- CodexBar 0.49 or newer, for account usage and balance cards
 - Tailscale, optional but recommended
+
+Sqwack reads Codex, Claude, and DeepSeek usage through CodexBar's local CLI
+when available. Codex and Claude are requested through CodexBar's CLI source;
+DeepSeek uses CodexBar's configured API account because CodexBar does not expose
+a DeepSeek CLI source.
+
+Provider icons are vendored from `@lobehub/icons-static-png` 1.94.0 (MIT).
 
 ## Install
 

@@ -85,9 +85,9 @@ exists — no reverse-engineered network calls:
 
 - **Codex**: rate-limit snapshots (used %, window, reset time, plan) that Codex
   itself writes into its session rollout files. Refreshed manually from the app.
-- **Claude**: Claude Code exposes no account rate-limit data in any local file
-  (verified against transcripts) — so no meter is shown rather than a fake one.
-  The adapter slot exists (`daemon/src/usage/usage.ts`) for when it does.
+- **Claude**: Sqwack does not read Claude OAuth tokens or call Anthropic usage
+  endpoints from the daemon. Cached Claude data may remain visible; fresh Claude
+  usage should come from Claude Code's local status line payload when we wire it.
 
 ## Desktop apps
 

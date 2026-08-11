@@ -24,13 +24,27 @@ struct Sparkline: View {
     }
 }
 
-/// Provider avatar: colored circle + glyph, as in the mockups.
+/// Provider avatar: official icon when available, fallback glyph otherwise.
 struct ProviderBadge: View {
     let provider: String
     var size: CGFloat = 44
 
+    private var normalizedProvider: String {
+        provider.lowercased()
+    }
+
+    private var assetName: String? {
+        switch normalizedProvider {
+        case "claude": "ProviderClaude"
+        case "codex": "ProviderOpenAI"
+        case "deepseek": "ProviderDeepSeek"
+        case "openai", "openai api": "ProviderOpenAI"
+        default: nil
+        }
+    }
+
     private var color: Color {
-        switch provider.lowercased() {
+        switch normalizedProvider {
         case "claude": .orange
         case "codex": .blue
         case "openai", "openai api": .green
@@ -40,7 +54,7 @@ struct ProviderBadge: View {
     }
 
     private var symbol: String {
-        switch provider.lowercased() {
+        switch normalizedProvider {
         case "claude": "rays"
         case "codex": "cube.fill"
         case "openai", "openai api": "sparkles"
@@ -50,11 +64,20 @@ struct ProviderBadge: View {
 
     var body: some View {
         ZStack {
-            Circle().fill(color.gradient)
-            Image(systemName: symbol)
-                .font(.system(size: size * 0.45, weight: .bold))
-                .foregroundStyle(.white)
+            Circle().fill(Color.consolePanelRaised)
+            if let assetName {
+                Image(assetName)
+                    .resizable()
+                    .scaledToFit()
+                    .padding(size * 0.18)
+            } else {
+                Circle().fill(color.gradient)
+                Image(systemName: symbol)
+                    .font(.system(size: size * 0.45, weight: .bold))
+                    .foregroundStyle(.white)
+            }
         }
+        .overlay(Circle().strokeBorder(Color.consoleStrokeBright))
         .frame(width: size, height: size)
     }
 }

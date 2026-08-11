@@ -57,10 +57,33 @@ final class SqwackStore {
         }
     }
 
-    func refreshProcesses() async {
+    func refreshAll() async {
+        for node in nodes {
+            await node.refreshSnapshot()
+        }
+    }
+
+    func refreshAgents() async {
+        await refreshAll()
+    }
+
+    func refreshProcessesOnly() async {
         for node in nodes {
             await node.refreshProcesses()
         }
+    }
+
+    func refreshProcesses() async {
+        await refreshAll()
+    }
+
+    var lastError: String? {
+        nodes.compactMap(\.lastError).first
+    }
+
+    @MainActor
+    func clearError() {
+        nodes.forEach { $0.clearError() }
     }
 
     // MARK: - Aggregation (machineId == nil means "all machines")
@@ -69,6 +92,7 @@ final class SqwackStore {
         nodes
             .flatMap { $0.sessions.values }
             .filter { machineId == nil || $0.machineId == machineId }
+            .filter { !($0.source == "claude-process" && $0.state == .idle) }
             .sorted { $0.updatedAt > $1.updatedAt }
     }
 

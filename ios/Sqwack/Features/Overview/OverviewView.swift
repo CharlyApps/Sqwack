@@ -192,14 +192,20 @@ private struct AccountUsageBand: View {
                     .foregroundStyle(.secondary)
                 Spacer()
                 Menu {
-                    Button("Refresh all", systemImage: "arrow.clockwise") {
+                    Button("Refresh Account Usage", systemImage: "chart.bar") {
                         Task { await store.refreshUsage() }
                     }
-                    Button("Refresh Codex", systemImage: "cube.fill") {
+                    Button("Refresh Codex Usage", systemImage: "cube.fill") {
                         Task { await store.refreshUsage(provider: "codex") }
                     }
-                    Button("Refresh Claude", systemImage: "rays") {
+                    Button("Refresh Claude Usage", systemImage: "sparkles") {
                         Task { await store.refreshUsage(provider: "claude") }
+                    }
+                    Button("Refresh DeepSeek Balance", systemImage: "creditcard") {
+                        Task { await store.refreshUsage(provider: "deepseek") }
+                    }
+                    Button("Refresh Dashboard", systemImage: "arrow.clockwise") {
+                        Task { await store.refreshAll() }
                     }
                 } label: {
                     Image(systemName: "arrow.clockwise.circle")
@@ -211,7 +217,7 @@ private struct AccountUsageBand: View {
             }
             if store.usage.isEmpty {
                 HStack {
-                    Text("Refresh account usage when you need it.")
+                    Text("Refresh usage when you need it.")
                         .foregroundStyle(.tertiary)
                     Spacer()
                 }
@@ -255,12 +261,39 @@ private struct UsageColumn: View {
         return p.usedPercent >= 90 ? .red : p.usedPercent >= 70 ? .amber : .blue
     }
 
-    private var planLabel: String {
-        usage.planType?.uppercased() ?? (usage.provider == "openai" ? "PAYG" : "PRO")
+    private var displayName: String {
+        switch usage.provider.lowercased() {
+        case "codex": "Codex"
+        case "claude": "Claude"
+        case "deepseek": "DeepSeek"
+        default: usage.provider.capitalized
+        }
+    }
+
+    private var planLabel: String? {
+        switch usage.provider.lowercased() {
+        case "codex": "PRO"
+        case "claude": nil
+        case "deepseek": "API"
+        default: usage.planType?.uppercased()
+        }
+    }
+
+    private var isBalanceStyle: Bool {
+        usage.provider.lowercased() == "deepseek" || primary?.detail?.contains("$") == true
+    }
+
+    private var metricText: String {
+        guard let primary else { return "--" }
+        if isBalanceStyle, let detail = primary.detail {
+            return detail.split(separator: "(").first.map { String($0).trimmingCharacters(in: .whitespaces) } ?? detail
+        }
+        return "\(Int(primary.usedPercent))%"
     }
 
     private var detailText: String {
-        usage.windows.map { "\($0.label) \(Int($0.usedPercent))%" }.joined(separator: " / ")
+        if isBalanceStyle { return primary?.detail ?? usage.source }
+        return usage.windows.map { "\($0.label) \(Int($0.usedPercent))%" }.joined(separator: " / ")
     }
 
     private func resetText(_ window: UsageWindow) -> String {
@@ -273,18 +306,20 @@ private struct UsageColumn: View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 10) {
                 ProviderBadge(provider: usage.provider, size: 28)
-                Text(usage.provider.capitalized)
+                Text(displayName)
                     .font(.headline.weight(.semibold))
-                Text(planLabel)
-                    .font(.caption.weight(.bold))
-                    .foregroundStyle(.purple.opacity(0.95))
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 3)
-                    .background(Capsule().fill(.purple.opacity(0.18)))
+                if let planLabel {
+                    Text(planLabel)
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(.purple.opacity(0.95))
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 3)
+                        .background(Capsule().fill(.purple.opacity(0.18)))
+                }
             }
             if let primary {
                 HStack(alignment: .firstTextBaseline) {
-                    Text(verbatim: "\(Int(primary.usedPercent))%")
+                    Text(verbatim: metricText)
                         .font(.system(size: 26, weight: .heavy, design: .rounded))
                     Spacer()
                     Text(detailText)
@@ -293,18 +328,20 @@ private struct UsageColumn: View {
                         .lineLimit(1)
                         .minimumScaleFactor(0.7)
                 }
-                MeterBar(fraction: primary.usedPercent / 100, color: barColor)
-                    .frame(height: 5)
-                HStack(spacing: 7) {
-                    Image(systemName: "clock")
-                        .font(.caption)
-                    Text(resetText(primary).isEmpty ? primary.label : resetText(primary))
-                        .font(.caption)
-                    Spacer()
-                    Text(primary.label)
-                        .font(.caption)
+                if !isBalanceStyle {
+                    MeterBar(fraction: primary.usedPercent / 100, color: barColor)
+                        .frame(height: 5)
+                    HStack(spacing: 7) {
+                        Image(systemName: "clock")
+                            .font(.caption)
+                        Text(resetText(primary).isEmpty ? primary.label : resetText(primary))
+                            .font(.caption)
+                        Spacer()
+                        Text(primary.label)
+                            .font(.caption)
+                    }
+                    .foregroundStyle(.tertiary)
                 }
-                .foregroundStyle(.tertiary)
             } else {
                 Text("No usage windows")
                     .font(.subheadline)
@@ -329,6 +366,36 @@ private struct UsageCard: View {
         return p.usedPercent >= 90 ? .red : p.usedPercent >= 70 ? .amber : .blue
     }
 
+    private var displayName: String {
+        switch usage.provider.lowercased() {
+        case "codex": "Codex"
+        case "claude": "Claude"
+        case "deepseek": "DeepSeek"
+        default: usage.provider.capitalized
+        }
+    }
+
+    private var planLabel: String? {
+        switch usage.provider.lowercased() {
+        case "codex": "PRO"
+        case "claude": nil
+        case "deepseek": "API"
+        default: usage.planType?.uppercased()
+        }
+    }
+
+    private var isBalanceStyle: Bool {
+        usage.provider.lowercased() == "deepseek" || primary?.detail?.contains("$") == true
+    }
+
+    private var metricText: String {
+        guard let primary else { return "--" }
+        if isBalanceStyle, let detail = primary.detail {
+            return detail.split(separator: "(").first.map { String($0).trimmingCharacters(in: .whitespaces) } ?? detail
+        }
+        return "\(Int(primary.usedPercent))%"
+    }
+
     private func resetText(_ window: UsageWindow) -> String {
         guard let resets = window.resetsAt else { return "" }
         let when = resets.formatted(date: .abbreviated, time: .shortened)
@@ -340,9 +407,9 @@ private struct UsageCard: View {
             HStack(spacing: 10) {
                 ProviderBadge(provider: usage.provider, size: 36)
                 VStack(alignment: .leading, spacing: 1) {
-                    Text(usage.provider.capitalized).font(.headline)
-                    if let plan = usage.planType {
-                        Text(plan.capitalized).font(.caption).foregroundStyle(.secondary)
+                    Text(displayName).font(.headline)
+                    if let plan = planLabel {
+                        Text(plan).font(.caption).foregroundStyle(.secondary)
                     }
                 }
                 Spacer()
@@ -355,15 +422,17 @@ private struct UsageCard: View {
                 .help("Refresh \(usage.provider.capitalized) usage")
             }
             if let primary {
-                Text(verbatim: "\(Int(primary.usedPercent))%")
+                Text(verbatim: metricText)
                     .font(.system(.title, design: .rounded, weight: .heavy))
-                Text(usage.windows.map { "\($0.label) \(Int($0.usedPercent))%" }.joined(separator: " · "))
+                Text(isBalanceStyle ? primary.detail ?? usage.source : usage.windows.map { "\($0.label) \(Int($0.usedPercent))%" }.joined(separator: " · "))
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                MeterBar(fraction: primary.usedPercent / 100, color: barColor)
-                Text(resetText(primary))
-                    .font(.caption)
-                    .foregroundStyle(.tertiary)
+                if !isBalanceStyle {
+                    MeterBar(fraction: primary.usedPercent / 100, color: barColor)
+                    Text(resetText(primary))
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                }
             }
         }
         .padding(14)
