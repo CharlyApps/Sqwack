@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { reduceEvent, computeStatus, attentionSessions, sessionKey, sweepStale } from "../src/sessions/reducer.ts";
+import { reduceEvent, computeStatus, attentionSessions, sessionKey, sweepStale, isProbeWorkspace } from "../src/sessions/reducer.ts";
 import { validateEvent } from "../src/events/validate.ts";
 import type { AgentSession, SqwackEvent } from "../src/types.ts";
 
@@ -120,4 +120,44 @@ test("event validation accepts canonical and rejects malformed", () => {
   assert.ok("error" in validateEvent({ ...good, timestamp: "not-a-date" }));
   assert.ok("error" in validateEvent({ ...good, source: { provider: "skynet", integration: "x" } }));
   assert.ok("error" in validateEvent({ ...good, severity: "catastrophic" }));
+});
+
+test("probe workspace paths are recognised, real projects are not", () => {
+  assert.equal(isProbeWorkspace("/Users/me/Library/Application Support/CodexBar/ClaudeProbe"), true);
+  assert.equal(isProbeWorkspace("/Users/me/Repos/Sqwack"), false);
+  assert.equal(isProbeWorkspace(undefined), false);
+});
+
+test("probe events are dropped at ingest — no event, no session, no activity", async () => {
+  const { openMemoryStore } = await import("../src/persistence/db.ts");
+  const { Engine } = await import("../src/core.ts");
+  const engine = new Engine(openMemoryStore(), {
+    machineId: "m1",
+    machineName: "test",
+    network: { port: 0, bind: "127.0.0.1", tailscaleServe: false },
+    logLevel: "error",
+    logEventBodies: false,
+    retentionDays: { events: 14, sessions: 30 },
+    processFilters: { excludeCommands: [] },
+  } as Parameters<typeof Engine.prototype.constructor>[1]);
+
+  const probe = ev({
+    type: "agent.started",
+    sessionId: "probe-1",
+    source: { provider: "claude", integration: "claude-code", surface: "cli" },
+    project: { name: "ClaudeProbe", cwd: "/Users/me/Library/Application Support/CodexBar/ClaudeProbe" },
+  });
+  assert.equal(engine.ingest(probe), false);
+
+  const real = ev({
+    type: "agent.started",
+    sessionId: "real-1",
+    source: { provider: "claude", integration: "claude-code", surface: "cli" },
+    project: { name: "Sqwack", cwd: "/Users/me/Repos/Sqwack" },
+  });
+  assert.equal(engine.ingest(real), true);
+
+  const snap = engine.snapshot();
+  assert.deepEqual(snap.sessions.map((s) => s.projectName), ["Sqwack"]);
+  assert.equal(snap.activity.some((a) => a.message.includes("ClaudeProbe")), false);
 });

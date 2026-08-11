@@ -174,7 +174,7 @@ private struct AppChrome: View {
                     .foregroundStyle(.secondary)
                 }
                 Menu {
-                    Button("Refresh All", systemImage: "arrow.clockwise") {
+                    Button("Refresh Dashboard", systemImage: "arrow.clockwise") {
                         Task { await store.refreshAll() }
                     }
                     Button("Refresh Agents", systemImage: "person.2") {

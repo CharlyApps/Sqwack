@@ -80,6 +80,12 @@ test("pairing flow: start -> complete -> device token works, code is single-use"
   });
   assert.equal(wrong.status, 401);
 
+  const oversized = await fetch(`${BASE}/v1/pair`, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ code: "A".repeat(100), deviceName: "iPad" }),
+  });
+  assert.equal(oversized.status, 401);
+
   const ok = await fetch(`${BASE}/v1/pair`, {
     method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ code, deviceName: "Test iPad" }),
@@ -148,6 +154,24 @@ test("websocket rejects bad token", async () => {
     ws.on("open", () => resolve(false));
   });
   assert.equal(failed, true);
+});
+
+test("revoking a device closes its existing websocket", async () => {
+  const start = await fetch(`${BASE}/v1/pair/start`, { method: "POST", headers: authed(admin) });
+  const { code } = (await start.json()) as { code: string };
+  const paired = await fetch(`${BASE}/v1/pair`, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ code, deviceName: "Revoked iPad" }),
+  });
+  const { token, deviceId } = (await paired.json()) as { token: string; deviceId: string };
+
+  const { WebSocket: WS } = await import("ws");
+  const ws = new WS(`ws://127.0.0.1:${PORT}/v1/ws?token=${token}`);
+  await new Promise<void>((resolve) => ws.once("message", () => resolve()));
+  const closed = new Promise<number>((resolve) => ws.once("close", (code) => resolve(code)));
+  engine.store.revokeDevice(deviceId);
+  engine.heartbeat();
+  assert.equal(await closed, 1008);
 });
 
 test("claude hook normalization end-to-end", async () => {

@@ -1,4 +1,4 @@
-import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { closeSync, existsSync, openSync, readSync, readdirSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { AgentSession } from "../types.ts";
@@ -24,6 +24,7 @@ const CLAUDE_PROJECTS = () => process.env.SQWACK_CLAUDE_PROJECTS ?? join(homedir
 const CODEX_SESSIONS = () => process.env.SQWACK_CODEX_SESSIONS ?? join(homedir(), ".codex", "sessions");
 const MAX_MESSAGES = 80;
 const MAX_CHARS = 4000;
+const MAX_READ_BYTES = 2 * 1024 * 1024;
 
 export function readTranscript(sessionId: string, session?: AgentSession): Transcript {
   const [provider, ...rest] = sessionId.split(":");
@@ -36,6 +37,29 @@ export function readTranscript(sessionId: string, session?: AgentSession): Trans
 
 function clip(text: string): string {
   return text.length > MAX_CHARS ? text.slice(0, MAX_CHARS) + "\n…" : text;
+}
+
+function readChunk(path: string, start: number, length: number): string {
+  const fd = openSync(path, "r");
+  try {
+    const buffer = Buffer.alloc(length);
+    return buffer.subarray(0, readSync(fd, buffer, 0, length, start)).toString("utf8");
+  } finally {
+    closeSync(fd);
+  }
+}
+
+function readTail(path: string): string {
+  const size = statSync(path).size;
+  const start = Math.max(0, size - MAX_READ_BYTES);
+  const text = readChunk(path, start, size - start);
+  if (start === 0) return text;
+  const firstNewline = text.indexOf("\n");
+  return firstNewline === -1 ? "" : text.slice(firstNewline + 1);
+}
+
+function readFirstLine(path: string): string | undefined {
+  return readChunk(path, 0, Math.min(statSync(path).size, 64 * 1024)).split("\n")[0] || undefined;
 }
 
 function readClaudeTranscript(sessionUuid: string): Transcript {
@@ -56,7 +80,7 @@ function readClaudeTranscript(sessionUuid: string): Transcript {
   if (!file) return { available: false, messages: [] };
 
   const messages: TranscriptMessage[] = [];
-  for (const line of readFileSync(file, "utf8").split("\n")) {
+  for (const line of readTail(file).split("\n")) {
     if (!line) continue;
     let entry: Record<string, unknown>;
     try {
@@ -84,10 +108,10 @@ function readCodexTranscript(threadId: string, session?: AgentSession): Transcri
   // Rollouts live at ~/.codex/sessions/YYYY/MM/DD/rollout-<ts>-<thread-id>.jsonl
   let file = findCodexTranscript(threadId);
   if (!file && session?.cwd) file = findCodexTranscriptBySession(session);
-  if (!file || statSync(file).size > 64 * 1024 * 1024) return { available: false, messages: [] };
+  if (!file) return { available: false, messages: [] };
 
   const messages: TranscriptMessage[] = [];
-  for (const line of readFileSync(file, "utf8").split("\n")) {
+  for (const line of readTail(file).split("\n")) {
     if (!line) continue;
     let entry: Record<string, unknown>;
     try {
@@ -142,8 +166,7 @@ function findCodexTranscriptBySession(session: AgentSession): string | undefined
   const target = Date.parse(session.updatedAt);
   // ponytail: cwd+15m fallback maps Codex notify turn ids to nearby hook rollouts; add exact notify thread id if Codex exposes it.
   for (const file of recentCodexRollouts()) {
-    if (statSync(file).size > 64 * 1024 * 1024) continue;
-    const first = readFileSync(file, "utf8").split("\n").find(Boolean);
+    const first = readFirstLine(file);
     if (!first) continue;
     try {
       const meta = JSON.parse(first) as { type?: string; timestamp?: string; payload?: { cwd?: string; timestamp?: string } };

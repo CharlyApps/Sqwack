@@ -26,6 +26,19 @@ test("reads modern Claude transcript messages", () => {
   assert.deepEqual(transcript.messages.map((m) => [m.role, m.text]), [["user", "hello"], ["assistant", "hi"]]);
 });
 
+test("reads only the tail of a large Claude transcript", () => {
+  const dir = join(process.env.SQWACK_CLAUDE_PROJECTS!, "-large-proj");
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, "large-123.jsonl"), [
+    JSON.stringify({ type: "queue-operation", content: "x".repeat(2 * 1024 * 1024) }),
+    JSON.stringify({ type: "user", message: { role: "user", content: "recent" } }),
+    JSON.stringify({ type: "assistant", message: { role: "assistant", content: "answer" } }),
+  ].join("\n"));
+
+  const transcript = readTranscript("claude:large-123");
+  assert.deepEqual(transcript.messages.map((m) => m.text), ["recent", "answer"]);
+});
+
 test("reads Codex rollout messages", () => {
   const dir = join(process.env.SQWACK_CODEX_SESSIONS!, "2026", "08", "10");
   mkdirSync(dir, { recursive: true });

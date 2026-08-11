@@ -181,7 +181,7 @@ private struct ResourcePanel: View {
             if let stats = store.system?.stats {
                 ResourceRow(icon: "cpu", label: "CPU",
                             value: "\(Int(stats.cpuPercent))%",
-                            detail: "\(Int(stats.cpuSystemPercent))% system · \(Int(stats.cpuUserPercent))% user",
+                            detail: "Total across the machine",
                             fraction: stats.cpuPercent / 100, color: .blue)
                 ResourceRow(icon: "memorychip", label: "RAM",
                             value: "\(Format.bytes(stats.ramUsedBytes)) / \(Format.bytes(stats.ramTotalBytes))",

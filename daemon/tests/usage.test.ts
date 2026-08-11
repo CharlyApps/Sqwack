@@ -1,9 +1,11 @@
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, chmodSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, chmodSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { collectCodexBarUsage, collectCodexUsage, collectUsage } from "../src/usage/usage.ts";
+import { Engine } from "../src/core.ts";
+import { openMemoryStore } from "../src/persistence/db.ts";
 
 const root = mkdtempSync(join(tmpdir(), "sqwack-usage-"));
 after(() => rmSync(root, { recursive: true, force: true }));
@@ -119,5 +121,32 @@ test("claude usage refresh does not touch oauth network", async () => {
   } finally {
     delete process.env.SQWACK_CODEXBAR_DISABLE;
     globalThis.fetch = originalFetch;
+  }
+});
+
+test("engine suppresses repeated provider refreshes for five minutes", async () => {
+  const bin = join(root, "codexbar-counting-fake");
+  const count = join(root, "codexbar-invocations");
+  writeFileSync(bin, `#!/bin/sh
+printf x >> "${count}"
+printf '[{"provider":"%s","usage":{"primary":{"usedPercent":1},"updatedAt":"2026-08-11T03:23:03Z"}}]\n' "$3"
+`);
+  chmodSync(bin, 0o755);
+  process.env.SQWACK_CODEXBAR_BIN = bin;
+  const store = openMemoryStore();
+  const engine = new Engine(store, {
+    machineId: "m", machineName: "test",
+    network: { port: 4737, bind: "127.0.0.1", tailscaleServe: false },
+    logLevel: "error", logEventBodies: false,
+    retentionDays: { events: 14, sessions: 30 },
+    processFilters: { excludeCommands: [] },
+  });
+  try {
+    await engine.refreshUsage("claude");
+    await engine.refreshUsage("claude");
+    assert.equal(readFileSync(count, "utf8"), "x");
+  } finally {
+    store.close();
+    delete process.env.SQWACK_CODEXBAR_BIN;
   }
 });

@@ -272,7 +272,7 @@ private struct UsageColumn: View {
 
     private var planLabel: String? {
         switch usage.provider.lowercased() {
-        case "codex": "PRO"
+        case "codex": usage.planType?.lowercased() == "chatgpt" ? nil : usage.planType?.uppercased()
         case "claude": nil
         case "deepseek": "API"
         default: usage.planType?.uppercased()
@@ -316,6 +316,10 @@ private struct UsageColumn: View {
                         .padding(.vertical, 3)
                         .background(Capsule().fill(.purple.opacity(0.18)))
                 }
+                Spacer()
+                Text("Cached · \(usage.collectedAt.agoLabel(at: now))")
+                    .font(.caption)
+                    .foregroundStyle(now.timeIntervalSince(usage.collectedAt) > 15 * 60 ? Color.orange : Color.secondary)
             }
             if let primary {
                 HStack(alignment: .firstTextBaseline) {
@@ -377,7 +381,7 @@ private struct UsageCard: View {
 
     private var planLabel: String? {
         switch usage.provider.lowercased() {
-        case "codex": "PRO"
+        case "codex": usage.planType?.lowercased() == "chatgpt" ? nil : usage.planType?.uppercased()
         case "claude": nil
         case "deepseek": "API"
         default: usage.planType?.uppercased()

@@ -38,6 +38,7 @@ function bearer(req: IncomingMessage): string | undefined {
 export function startServer(engine: Engine) {
   const auth = new Auth(engine.store);
   const killTimestamps: number[] = [];
+  type Caller = NonNullable<ReturnType<Auth["authenticate"]>>;
 
   const server = createServer(async (req, res) => {
     try {
@@ -169,22 +170,27 @@ export function startServer(engine: Engine) {
 
   // --- WebSocket ---
   const wss = new WebSocketServer({ noServer: true });
+  const wsCallers = new WeakMap<WebSocket, Caller>();
   server.on("upgrade", (req, socket, head) => {
     const url = new URL(req.url ?? "/", "http://localhost");
     if (url.pathname !== "/v1/ws") return socket.destroy();
     const token = bearer(req) ?? url.searchParams.get("token") ?? undefined;
-    if (!auth.authenticate(token)) {
+    const caller = auth.authenticate(token);
+    if (!caller) {
       socket.write("HTTP/1.1 401 Unauthorized\r\n\r\n");
       return socket.destroy();
     }
-    wss.handleUpgrade(req, socket, head, (ws) => wss.emit("connection", ws, req));
+    wss.handleUpgrade(req, socket, head, (ws) => {
+      wsCallers.set(ws, caller);
+      wss.emit("connection", ws, req);
+    });
   });
 
   wss.on("connection", (ws: WebSocket) => {
     log.info("websocket client connected");
     // Snapshot first, always — a live broadcast must never beat the snapshot.
     ws.send(JSON.stringify({ type: "snapshot", data: engine.snapshot() }));
-    engine.refreshProcesses(false)
+    engine.refreshProcesses()
       .then(() => {
         if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "snapshot", data: engine.snapshot() }));
       })
@@ -195,6 +201,11 @@ export function startServer(engine: Engine) {
   const unsubscribe = engine.onBroadcast((msg) => {
     const data = JSON.stringify(msg);
     for (const client of wss.clients) {
+      const caller = wsCallers.get(client);
+      if (caller?.kind === "device" && !engine.store.isDeviceActive(caller.id)) {
+        client.close(1008, "device revoked");
+        continue;
+      }
       if (client.readyState === WebSocket.OPEN) client.send(data);
     }
   });

@@ -9,6 +9,16 @@ const EVENT_STATE: Partial<Record<SqwackEvent["type"], AgentState>> = {
   "agent.idle": "idle",
 };
 
+/**
+ * Agent runs inside another app's container are that app's machinery, not the
+ * user's work — e.g. a menu-bar tool spawning a throwaway Claude session every
+ * couple of minutes to poll account usage, which has no local source otherwise.
+ * Nothing a person works on lives under Application Support.
+ */
+export function isProbeWorkspace(cwd?: string): boolean {
+  return cwd?.includes("/Library/Application Support/") ?? false;
+}
+
 // Events without a sessionId (single-session CLI adapters) collapse onto a
 // deterministic per-provider/per-project session.
 export function sessionKey(event: SqwackEvent): string | undefined {

@@ -49,7 +49,9 @@ AI agents + dev services
 Sqwack reads Codex, Claude, and DeepSeek usage through CodexBar's local CLI
 when available. Codex and Claude are requested through CodexBar's CLI source;
 DeepSeek uses CodexBar's configured API account because CodexBar does not expose
-a DeepSeek CLI source.
+a DeepSeek CLI source. Usage refresh is manual, repeated requests for the same
+provider are suppressed for five minutes, and the iPad labels cached values with
+their age.
 
 Provider icons are vendored from `@lobehub/icons-static-png` 1.94.0 (MIT).
 

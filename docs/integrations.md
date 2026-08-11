@@ -84,10 +84,14 @@ The Overview shows provider usage meters where a *local, native* data source
 exists — no reverse-engineered network calls:
 
 - **Codex**: rate-limit snapshots (used %, window, reset time, plan) that Codex
-  itself writes into its session rollout files. Refreshed manually from the app.
+  exposes through CodexBar's CLI source, with local session rollouts as fallback.
 - **Claude**: Sqwack does not read Claude OAuth tokens or call Anthropic usage
-  endpoints from the daemon. Cached Claude data may remain visible; fresh Claude
-  usage should come from Claude Code's local status line payload when we wire it.
+  endpoints from the daemon. CodexBar supplies its CLI-source snapshot.
+- **DeepSeek**: CodexBar supplies the configured API-account balance because no
+  CLI source exists.
+
+Refresh is manual. Sqwack suppresses repeat requests to the same provider for
+five minutes, and cached values remain labeled with their age on the iPad.
 
 ## Desktop apps
 

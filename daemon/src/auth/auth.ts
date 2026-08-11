@@ -46,9 +46,13 @@ export class Auth {
     const now = Date.now();
     this.failures = this.failures.filter((t) => now - t < 5 * 60_000);
     if (this.failures.length >= 5) return { error: "too many attempts, wait 5 minutes", status: 429 };
+    if (!/^[0-9a-f]{8}$/i.test(code)) {
+      this.failures.push(now);
+      return { error: "invalid or expired pairing code", status: 401 };
+    }
     const p = this.pending;
-    const supplied = Buffer.from(code.toUpperCase().padEnd(16));
-    const expected = Buffer.from((p?.code ?? "").padEnd(16));
+    const supplied = Buffer.from(code.toUpperCase());
+    const expected = Buffer.from(p?.code ?? "00000000");
     if (!p || now > p.expiresAt || !timingSafeEqual(supplied, expected)) {
       this.failures.push(now);
       return { error: "invalid or expired pairing code", status: 401 };

@@ -128,6 +128,10 @@ export class Store {
     this.db.prepare("UPDATE devices SET revoked = 1 WHERE id = ?").run(id);
   }
 
+  isDeviceActive(id: string): boolean {
+    return Boolean(this.db.prepare("SELECT 1 FROM devices WHERE id = ? AND revoked = 0").get(id));
+  }
+
   // --- settings ---
   getSetting(key: string): string | undefined {
     const row = this.db.prepare("SELECT value FROM settings WHERE key = ?").get(key);

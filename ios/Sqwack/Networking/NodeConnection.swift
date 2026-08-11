@@ -42,6 +42,7 @@ final class NodeConnection {
 
     func connect() {
         closed = false
+        guard socket == nil else { return }
         openSocket()
     }
 
@@ -154,7 +155,6 @@ final class NodeConnection {
     @MainActor
     private func reportError(_ context: String, _ error: Error) {
         lastError = "\(context): \(error.localizedDescription)"
-        lastHeartbeat = .now
     }
 
     private func decodeError(_ context: String) -> NSError {

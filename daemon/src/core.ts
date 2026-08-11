@@ -2,7 +2,7 @@ import type { AgentSession, DevProcess, ServerMessage, Snapshot, SqwackEvent, Sq
 import type { Store } from "./persistence/db.ts";
 import type { Config } from "./config.ts";
 import { machineInfo } from "./config.ts";
-import { reduceEvent, sessionKey, computeStatus, attentionSessions, sweepStale } from "./sessions/reducer.ts";
+import { reduceEvent, sessionKey, computeStatus, attentionSessions, sweepStale, isProbeWorkspace } from "./sessions/reducer.ts";
 import { discoverProcesses } from "./processes/discovery.ts";
 import { discoverClaudeProcessSessions } from "./adapters/claude/processes.ts";
 import { collectUsage, USAGE_PROVIDERS, type ProviderUsage, type UsageProvider } from "./usage/usage.ts";
@@ -21,6 +21,7 @@ export class Engine {
   private top: ProcessMetric[] = [];
   private serviceCpuHistory = new Map<number, number[]>();
   private usageRefreshes = new Map<string, Promise<void>>();
+  private usageAttemptedAt = new Map<UsageProvider, number>();
 
   public store: Store;
   public config: Config;
@@ -42,6 +43,12 @@ export class Engine {
 
   /** Ingest a validated event. Returns false for duplicates. */
   ingest(event: SqwackEvent): boolean {
+    // Dropped before storage, not just hidden: probe events would otherwise
+    // dominate the activity feed and per-session sparklines.
+    if (isProbeWorkspace(event.project?.cwd)) {
+      log.debug("probe workspace event ignored", { cwd: event.project?.cwd });
+      return false;
+    }
     if (!this.store.insertEvent(event)) {
       log.debug("duplicate event ignored", { id: event.id });
       return false;
@@ -204,6 +211,9 @@ export class Engine {
       await Promise.all(USAGE_PROVIDERS.map((p) => this.refreshUsageNow(p)));
       return;
     }
+    const now = Date.now();
+    if (now - (this.usageAttemptedAt.get(provider) ?? 0) < 5 * 60_000) return;
+    this.usageAttemptedAt.set(provider, now);
     const fresh = await collectUsage(provider);
     const cutoff = Date.now() - 15 * 60_000;
     // ponytail: short stale window smooths transient 429/offline reads; add per-provider error state if users need diagnostics.

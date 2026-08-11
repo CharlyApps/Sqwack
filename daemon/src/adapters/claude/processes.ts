@@ -2,6 +2,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { basename } from "node:path";
 import type { AgentSession } from "../../types.ts";
+import { isProbeWorkspace } from "../../sessions/reducer.ts";
 
 const exec = promisify(execFile);
 
@@ -73,5 +74,7 @@ export async function discoverClaudeProcessSessions(machineId: string): Promise<
     return [];
   }
   const cwd = await cwdByPid(processes.map((p) => p.pid));
-  return processes.map((p) => sessionFromClaudeProcess(machineId, { ...p, cwd: cwd.get(p.pid) }));
+  return processes
+    .map((p) => sessionFromClaudeProcess(machineId, { ...p, cwd: cwd.get(p.pid) }))
+    .filter((s) => !isProbeWorkspace(s.cwd));
 }
