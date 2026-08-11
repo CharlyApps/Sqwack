@@ -8,10 +8,10 @@ import { collectCodexUsage } from "../src/usage/usage.ts";
 const root = mkdtempSync(join(tmpdir(), "sqwack-usage-"));
 after(() => rmSync(root, { recursive: true, force: true }));
 
-function writeSession(lines: string[]): string {
+function writeSession(lines: string[], name = "rollout-test.jsonl"): string {
   const dir = join(root, "2026", "08", "10");
   mkdirSync(dir, { recursive: true });
-  const path = join(dir, "rollout-test.jsonl");
+  const path = join(dir, name);
   writeFileSync(path, lines.join("\n") + "\n");
   return root;
 }
@@ -47,4 +47,18 @@ test("missing or shapeless data yields undefined, never fake numbers", () => {
   assert.equal(collectCodexUsage(join(root, "nonexistent")), undefined);
   const sessions = writeSession([JSON.stringify({ type: "event_msg", payload: { type: "agent_message" } })]);
   assert.equal(collectCodexUsage(sessions), undefined);
+});
+
+test("falls back to recent rollout with rate limits", () => {
+  writeSession([JSON.stringify({
+    type: "event_msg",
+    payload: {
+      rate_limits: {
+        primary: { used_percent: 9, window_minutes: 300 },
+      },
+    },
+  })], "rollout-old.jsonl");
+  writeSession([JSON.stringify({ type: "event_msg", payload: { type: "agent_message" } })], "rollout-new.jsonl");
+  const usage = collectCodexUsage(root)!;
+  assert.equal(usage.windows[0].usedPercent, 9);
 });

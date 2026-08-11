@@ -1,33 +1,46 @@
 import SwiftUI
 
-/// The ambient screen. One second from several feet away must answer:
-/// "Does anything need me?" Status header dominates; agent cards carry the
-/// detail; Services / System / Activity sit in a calm bottom band.
 struct OverviewView: View {
     @Environment(SqwackStore.self) private var store
 
     var body: some View {
-        TimelineView(.periodic(from: .now, by: 1)) { _ in
+        TimelineView(.periodic(from: .now, by: 1)) { timeline in
             ScrollView {
-                VStack(alignment: .leading, spacing: 22) {
-                    StatusHeader()
-                    AgentCardsRow()
+                VStack(alignment: .leading, spacing: 14) {
+                    DashboardTopStrip(now: timeline.date)
                     HStack(alignment: .top, spacing: 20) {
                         ServicesPanel()
                         SystemPanel()
-                        ActivityPanel()
+                        ActivityPanel(now: timeline.date)
                     }
-                    if !store.usage.isEmpty { AccountUsageBand() }
+                    AccountUsageBand(now: timeline.date)
                 }
-                .padding(28)
+                .padding(.horizontal, 26)
+                .padding(.top, 12)
+                .padding(.bottom, 12)
             }
         }
-        .background(Color(.systemBackground))
+        .background(Color.consoleBackground)
+    }
+}
+
+private struct DashboardTopStrip: View {
+    let now: Date
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 16) {
+            StatusHeader(now: now)
+                .frame(minWidth: 240, idealWidth: 280, maxWidth: 300, alignment: .leading)
+                .layoutPriority(1)
+            AgentCardsRow(now: now)
+                .frame(maxWidth: .infinity)
+        }
     }
 }
 
 private struct StatusHeader: View {
     @Environment(SqwackStore.self) private var store
+    let now: Date
 
     private var subline: String {
         let working = store.sessions().filter { $0.state == .working }.count
@@ -48,39 +61,31 @@ private struct StatusHeader: View {
 
     var body: some View {
         let status = store.globalStatus
-        HStack(alignment: .top) {
-            VStack(alignment: .leading, spacing: 6) {
-                HStack(spacing: 16) {
-                    Circle()
-                        .fill(status.color)
-                        .frame(width: 24, height: 24)
-                        .modifier(status == .attention ? AnyModifier(AttentionPulse()) : AnyModifier(EmptyModifier()))
-                    Text(status.headline)
-                        .font(.system(size: 56, weight: .heavy, design: .rounded))
-                        .foregroundStyle(status == .quiet ? Color.primary : status.color)
-                }
-                Text(subline)
-                    .font(.title3)
-                    .foregroundStyle(.secondary)
-                Text(needLine)
-                    .font(.body)
-                    .foregroundStyle(status == .attention || status == .failure ? status.color : Color.secondary)
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 12) {
+                Circle()
+                    .fill(status.color)
+                    .frame(width: 18, height: 18)
+                    .modifier(status == .attention ? AnyModifier(AttentionPulse()) : AnyModifier(EmptyModifier()))
+                Text(status.headline)
+                    .font(.system(size: 40, weight: .heavy, design: .rounded))
+                    .foregroundStyle(status == .quiet ? Color.primary : status.color)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.75)
             }
-            Spacer()
-            VStack(alignment: .trailing, spacing: 4) {
-                Text(Date.now, format: .dateTime.hour().minute())
-                    .font(.system(size: 38, weight: .medium, design: .rounded))
-                    .foregroundStyle(.secondary)
-                Text(Date.now, format: .dateTime.weekday(.abbreviated).day().month(.abbreviated))
-                    .font(.title3)
-                    .foregroundStyle(.tertiary)
-                if !store.anyConnected {
-                    Label("Reconnecting…", systemImage: "wifi.slash")
-                        .font(.callout)
-                        .foregroundStyle(.orange)
-                }
+            Text(subline)
+                .font(.callout)
+                .foregroundStyle(.secondary)
+            Text(needLine)
+                .font(.callout)
+                .foregroundStyle(status == .attention || status == .failure ? status.color : Color.secondary)
+            if !store.anyConnected {
+                Label("Reconnecting...", systemImage: "wifi.slash")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
             }
         }
+        .frame(height: 132, alignment: .center)
     }
 }
 
@@ -94,22 +99,26 @@ struct AnyModifier: ViewModifier {
 
 private struct AgentCardsRow: View {
     @Environment(SqwackStore.self) private var store
+    let now: Date
 
     var body: some View {
         let sessions = store.boardSessions
         if sessions.isEmpty {
             Text("No recent agent activity")
-                .font(.title3)
+                .font(.body)
                 .foregroundStyle(.tertiary)
-                .frame(maxWidth: .infinity, minHeight: 160)
-                .background(RoundedRectangle(cornerRadius: 20).fill(Color(.secondarySystemBackground)))
+                .frame(maxWidth: .infinity, minHeight: 132)
+                .background(
+                    RoundedRectangle(cornerRadius: 16)
+                        .fill(Color.consolePanel)
+                        .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(Color.consoleStroke))
+                )
         } else {
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 16) {
-                    ForEach(sessions.prefix(6)) { session in
-                        AgentCard(session: session)
-                    }
+            HStack(spacing: 12) {
+                ForEach(sessions.prefix(4)) { session in
+                    AgentCard(session: session, now: now)
                 }
+                Spacer(minLength: 0)
             }
         }
     }
@@ -117,24 +126,25 @@ private struct AgentCardsRow: View {
 
 struct AgentCard: View {
     let session: AgentSession
+    let now: Date
 
     private var timeLabel: String {
         switch session.state {
-        case .needsInput: "Waiting " + (session.waitingSince ?? session.updatedAt).elapsedLabel
-        case .working: "Running " + (session.startedAt ?? session.updatedAt).elapsedLabel
-        default: session.updatedAt.agoLabel.sentenceCased
+        case .needsInput: "Waiting " + (session.waitingSince ?? session.updatedAt).elapsedLabel(at: now)
+        case .working: "Running " + (session.startedAt ?? session.updatedAt).elapsedLabel(at: now)
+        default: session.updatedAt.agoLabel(at: now).sentenceCased
         }
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 9) {
+        VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 10) {
-                ProviderBadge(provider: session.provider, size: 34)
+                ProviderBadge(provider: session.provider, size: 30)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(session.provider.providerLabel)
-                        .font(.system(.headline, design: .rounded, weight: .bold))
+                        .font(.system(.subheadline, design: .rounded, weight: .bold))
                     Text(session.projectName ?? session.title ?? session.source)
-                        .font(.subheadline)
+                        .font(.caption)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                 }
@@ -142,26 +152,26 @@ struct AgentCard: View {
             HStack(spacing: 8) {
                 Circle().fill(session.state.color).frame(width: 9, height: 9)
                 Text(session.state.label)
-                    .font(.system(.headline, design: .rounded, weight: .heavy))
+                    .font(.system(.subheadline, design: .rounded, weight: .heavy))
                     .foregroundStyle(session.state.color)
             }
             Text(timeLabel)
-                .font(.callout.monospacedDigit())
+                .font(.caption.monospacedDigit())
                 .foregroundStyle(.secondary)
             Sparkline(
                 values: (session.activity ?? []).map(Double.init),
                 color: session.state.color
             )
-            .frame(height: 20)
+            .frame(height: 16)
         }
         .padding(14)
-        .frame(width: 240, alignment: .leading)
+        .frame(minWidth: 0, maxWidth: 210, minHeight: 132, maxHeight: 132, alignment: .leading)
         .background(
-            RoundedRectangle(cornerRadius: 20)
-                .fill(Color(.secondarySystemBackground))
+            RoundedRectangle(cornerRadius: 16)
+                .fill(Color.consolePanel)
                 .overlay(
-                    RoundedRectangle(cornerRadius: 20)
-                        .strokeBorder(session.state.color.opacity(session.state == .needsInput ? 0.9 : 0.3), lineWidth: session.state == .needsInput ? 2.5 : 1)
+                    RoundedRectangle(cornerRadius: 16)
+                        .strokeBorder(session.state.color.opacity(session.state == .working ? 0.8 : 0.25), lineWidth: session.state == .working ? 1.2 : 1)
                 )
         )
         .modifier(session.state == .needsInput ? AnyModifier(AttentionPulse()) : AnyModifier(EmptyModifier()))
@@ -170,20 +180,70 @@ struct AgentCard: View {
 
 private struct AccountUsageBand: View {
     @Environment(SqwackStore.self) private var store
+    let now: Date
 
     var body: some View {
-        Panel(title: "ACCOUNT USAGE") {
-            HStack(alignment: .top, spacing: 16) {
-                ForEach(store.usage) { usage in
-                    UsageCard(usage: usage)
+        VStack(alignment: .leading, spacing: 18) {
+            HStack(spacing: 12) {
+                Text("ACCOUNT USAGE")
+                    .font(.headline.weight(.heavy))
+                Text("Manual refresh")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Menu {
+                    Button("Refresh all", systemImage: "arrow.clockwise") {
+                        Task { await store.refreshUsage() }
+                    }
+                    Button("Refresh Codex", systemImage: "cube.fill") {
+                        Task { await store.refreshUsage(provider: "codex") }
+                    }
+                    Button("Refresh Claude", systemImage: "rays") {
+                        Task { await store.refreshUsage(provider: "claude") }
+                    }
+                } label: {
+                    Image(systemName: "arrow.clockwise.circle")
+                        .font(.title3)
+                        .frame(width: 34, height: 30)
+                }
+                .buttonStyle(.plain)
+                .help("Refresh account usage")
+            }
+            if store.usage.isEmpty {
+                HStack {
+                    Text("Refresh account usage when you need it.")
+                        .foregroundStyle(.tertiary)
+                    Spacer()
+                }
+                .frame(minHeight: 86)
+            } else {
+                HStack(alignment: .top, spacing: 0) {
+                    ForEach(Array(store.usage.enumerated()), id: \.element.id) { index, usage in
+                        UsageColumn(usage: usage, now: now)
+                            .frame(maxWidth: .infinity)
+                        if index < store.usage.count - 1 {
+                            Rectangle()
+                                .fill(Color.consoleStroke)
+                                .frame(width: 1)
+                                .padding(.horizontal, 24)
+                        }
+                    }
                 }
             }
         }
+        .padding(20)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 16)
+                .fill(Color.consolePanel)
+                .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(Color.consoleStroke))
+        )
     }
 }
 
-private struct UsageCard: View {
+private struct UsageColumn: View {
     let usage: ProviderUsage
+    let now: Date
 
     /// The window that should dominate the card: the shortest (most urgent).
     private var primary: UsageWindow? {
@@ -195,13 +255,84 @@ private struct UsageCard: View {
         return p.usedPercent >= 90 ? .red : p.usedPercent >= 70 ? .amber : .blue
     }
 
+    private var planLabel: String {
+        usage.planType?.uppercased() ?? (usage.provider == "openai" ? "PAYG" : "PRO")
+    }
+
+    private var detailText: String {
+        usage.windows.map { "\($0.label) \(Int($0.usedPercent))%" }.joined(separator: " / ")
+    }
+
     private func resetText(_ window: UsageWindow) -> String {
         guard let resets = window.resetsAt else { return "" }
-        let hours = Int(resets.timeIntervalSinceNow / 3600)
-        let when = resets.formatted(date: .abbreviated, time: .omitted)
-        if hours <= 0 { return "Resets soon" }
-        if hours < 24 { return "Resets in \(hours)h" }
-        return "Resets in \(hours / 24) days · \(when)"
+        let when = resets.formatted(date: .abbreviated, time: .shortened)
+        return "Resets \(when) · \(now.preciseRemainingLabel(until: resets))"
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 10) {
+                ProviderBadge(provider: usage.provider, size: 28)
+                Text(usage.provider.capitalized)
+                    .font(.headline.weight(.semibold))
+                Text(planLabel)
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(.purple.opacity(0.95))
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 3)
+                    .background(Capsule().fill(.purple.opacity(0.18)))
+            }
+            if let primary {
+                HStack(alignment: .firstTextBaseline) {
+                    Text(verbatim: "\(Int(primary.usedPercent))%")
+                        .font(.system(size: 26, weight: .heavy, design: .rounded))
+                    Spacer()
+                    Text(detailText)
+                        .font(.subheadline.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
+                }
+                MeterBar(fraction: primary.usedPercent / 100, color: barColor)
+                    .frame(height: 5)
+                HStack(spacing: 7) {
+                    Image(systemName: "clock")
+                        .font(.caption)
+                    Text(resetText(primary).isEmpty ? primary.label : resetText(primary))
+                        .font(.caption)
+                    Spacer()
+                    Text(primary.label)
+                        .font(.caption)
+                }
+                .foregroundStyle(.tertiary)
+            } else {
+                Text("No usage windows")
+                    .font(.subheadline)
+                    .foregroundStyle(.tertiary)
+                    .frame(minHeight: 74, alignment: .leading)
+            }
+        }
+    }
+}
+
+private struct UsageCard: View {
+    @Environment(SqwackStore.self) private var store
+    let usage: ProviderUsage
+    let now: Date
+
+    private var primary: UsageWindow? {
+        usage.windows.min { a, b in a.label < b.label }
+    }
+
+    private var barColor: Color {
+        guard let p = primary else { return .green }
+        return p.usedPercent >= 90 ? .red : p.usedPercent >= 70 ? .amber : .blue
+    }
+
+    private func resetText(_ window: UsageWindow) -> String {
+        guard let resets = window.resetsAt else { return "" }
+        let when = resets.formatted(date: .abbreviated, time: .shortened)
+        return "Resets \(when) · \(now.preciseRemainingLabel(until: resets))"
     }
 
     var body: some View {
@@ -214,6 +345,14 @@ private struct UsageCard: View {
                         Text(plan.capitalized).font(.caption).foregroundStyle(.secondary)
                     }
                 }
+                Spacer()
+                Button {
+                    Task { await store.refreshUsage(provider: usage.provider) }
+                } label: {
+                    Image(systemName: "arrow.clockwise")
+                }
+                .buttonStyle(.borderless)
+                .help("Refresh \(usage.provider.capitalized) usage")
             }
             if let primary {
                 Text(verbatim: "\(Int(primary.usedPercent))%")
@@ -229,7 +368,7 @@ private struct UsageCard: View {
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(RoundedRectangle(cornerRadius: 14).fill(Color(.tertiarySystemBackground)))
+        .background(RoundedRectangle(cornerRadius: 14).fill(Color.consolePanelRaised))
     }
 }
 
@@ -243,10 +382,7 @@ struct UsageMeter: View {
 
     private var resetLabel: String? {
         guard let resets = window.resetsAt else { return nil }
-        let hours = Int(resets.timeIntervalSinceNow / 3600)
-        if hours <= 0 { return "resets soon" }
-        if hours < 24 { return "resets \(hours)h" }
-        return "resets \(hours / 24)d"
+        return "resets \(Date().preciseRemainingLabel(until: resets))"
     }
 
     var body: some View {
@@ -366,6 +502,7 @@ private struct StatTile: View {
 
 private struct ActivityPanel: View {
     @Environment(SqwackStore.self) private var store
+    let now: Date
 
     private func dotColor(_ severity: String) -> Color {
         switch severity {
@@ -388,7 +525,7 @@ private struct ActivityPanel: View {
                         .font(.subheadline)
                         .lineLimit(1)
                     Spacer()
-                    Text(item.timestamp.agoLabel)
+                    Text(item.timestamp.agoLabel(at: now))
                         .font(.caption)
                         .foregroundStyle(.tertiary)
                 }

@@ -104,7 +104,8 @@ export function startServer(engine: Engine) {
       const transcriptMatch = path.match(/^\/v1\/sessions\/([^/]+)\/transcript$/);
       if (method === "GET" && transcriptMatch) {
         // Read straight from the provider's own files; nothing is persisted.
-        return json(res, 200, readTranscript(decodeURIComponent(transcriptMatch[1])));
+        const id = decodeURIComponent(transcriptMatch[1]);
+        return json(res, 200, readTranscript(id, engine.store.getSession(id)));
       }
 
       const sessionMatch = path.match(/^\/v1\/sessions\/([^/]+)$/);
@@ -121,6 +122,17 @@ export function startServer(engine: Engine) {
       if (method === "GET" && path === "/v1/processes") {
         return json(res, 200, { processes: await engine.refreshProcesses() });
       }
+
+      if (method === "POST" && path === "/v1/usage/refresh") {
+        const body = (await readBody(req)) as { provider?: string };
+        if (body.provider && body.provider !== "codex" && body.provider !== "claude") {
+          return json(res, 400, { error: "unknown provider" });
+        }
+        const provider = body.provider as "codex" | "claude" | undefined;
+        await engine.refreshUsage(provider);
+        return json(res, 200, { usage: engine.snapshot().usage });
+      }
+
       const killMatch = path.match(/^\/v1\/processes\/([^/]+)\/kill$/);
       if (method === "POST" && killMatch) {
         const now = Date.now();
@@ -171,7 +183,6 @@ export function startServer(engine: Engine) {
     log.info("websocket client connected");
     // Snapshot first, always — a live broadcast must never beat the snapshot.
     ws.send(JSON.stringify({ type: "snapshot", data: engine.snapshot() }));
-    engine.refreshUsage().catch(() => {}); // fresh usage follows as usage.updated if changed
     engine.refreshSystem().catch(() => {});
     engine.refreshProcesses().catch(() => {}); // fresh process list follows as processes.updated
   });
@@ -187,7 +198,6 @@ export function startServer(engine: Engine) {
     setInterval(() => engine.heartbeat(), 30_000),
     setInterval(() => engine.sweep(), 60_000),
     setInterval(() => engine.refreshProcesses().catch((e) => log.debug("process refresh failed", String(e))), 20_000),
-    setInterval(() => engine.refreshUsage().catch((e) => log.debug("usage refresh failed", String(e))), 120_000),
     setInterval(() => engine.refreshSystem().catch((e) => log.debug("system refresh failed", String(e))), 10_000),
     setInterval(() => engine.store.prune(engine.config.retentionDays.events, engine.config.retentionDays.sessions), 6 * 3600_000),
   ];

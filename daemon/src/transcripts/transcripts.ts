@@ -1,6 +1,7 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import type { AgentSession } from "../types.ts";
 
 /**
  * On-demand, read-only transcript access. Conversations are read straight from
@@ -24,12 +25,12 @@ const CODEX_SESSIONS = () => process.env.SQWACK_CODEX_SESSIONS ?? join(homedir()
 const MAX_MESSAGES = 80;
 const MAX_CHARS = 4000;
 
-export function readTranscript(sessionId: string): Transcript {
+export function readTranscript(sessionId: string, session?: AgentSession): Transcript {
   const [provider, ...rest] = sessionId.split(":");
   const rawId = rest.join(":");
   if (!rawId) return { available: false, messages: [] };
   if (provider === "claude") return readClaudeTranscript(rawId);
-  if (provider === "codex") return readCodexTranscript(rawId);
+  if (provider === "codex") return readCodexTranscript(rawId, session);
   return { available: false, messages: [] };
 }
 
@@ -78,27 +79,11 @@ function readClaudeTranscript(sessionUuid: string): Transcript {
   return { available: messages.length > 0, source: "claude-code transcript (read-only)", messages: messages.slice(-MAX_MESSAGES) };
 }
 
-function readCodexTranscript(threadId: string): Transcript {
+function readCodexTranscript(threadId: string, session?: AgentSession): Transcript {
   if (!/^[\w-]+$/.test(threadId)) return { available: false, messages: [] };
   // Rollouts live at ~/.codex/sessions/YYYY/MM/DD/rollout-<ts>-<thread-id>.jsonl
-  let file: string | undefined;
-  try {
-    const root = CODEX_SESSIONS();
-    outer: for (const year of readdirSync(root).sort().reverse().slice(0, 2)) {
-      for (const month of readdirSync(join(root, year)).sort().reverse()) {
-        for (const day of readdirSync(join(root, year, month)).sort().reverse()) {
-          for (const name of readdirSync(join(root, year, month, day))) {
-            if (name.includes(threadId)) {
-              file = join(root, year, month, day, name);
-              break outer;
-            }
-          }
-        }
-      }
-    }
-  } catch {
-    return { available: false, messages: [] };
-  }
+  let file = findCodexTranscript(threadId);
+  if (!file && session?.cwd) file = findCodexTranscriptBySession(session);
   if (!file || statSync(file).size > 64 * 1024 * 1024) return { available: false, messages: [] };
 
   const messages: TranscriptMessage[] = [];
@@ -124,6 +109,52 @@ function readCodexTranscript(threadId: string): Transcript {
     }
   }
   return { available: messages.length > 0, source: "codex session rollout (read-only)", messages: messages.slice(-MAX_MESSAGES) };
+}
+
+function recentCodexRollouts(): string[] {
+  const files: string[] = [];
+  try {
+    const root = CODEX_SESSIONS();
+    for (const year of dirs(root).sort().reverse().slice(0, 2)) {
+      for (const month of dirs(join(root, year)).sort().reverse()) {
+        for (const day of dirs(join(root, year, month)).sort().reverse()) {
+          for (const name of readdirSync(join(root, year, month, day)).filter((e) => !e.startsWith("."))) {
+            if (name.endsWith(".jsonl")) files.push(join(root, year, month, day, name));
+          }
+        }
+      }
+    }
+  } catch {
+    return [];
+  }
+  return files.sort((a, b) => statSync(b).mtimeMs - statSync(a).mtimeMs).slice(0, 40);
+}
+
+function dirs(path: string): string[] {
+  return readdirSync(path).filter((e) => !e.startsWith(".") && statSync(join(path, e)).isDirectory());
+}
+
+function findCodexTranscript(threadId: string): string | undefined {
+  return recentCodexRollouts().find((file) => file.includes(threadId));
+}
+
+function findCodexTranscriptBySession(session: AgentSession): string | undefined {
+  const target = Date.parse(session.updatedAt);
+  // ponytail: cwd+15m fallback maps Codex notify turn ids to nearby hook rollouts; add exact notify thread id if Codex exposes it.
+  for (const file of recentCodexRollouts()) {
+    if (statSync(file).size > 64 * 1024 * 1024) continue;
+    const first = readFileSync(file, "utf8").split("\n").find(Boolean);
+    if (!first) continue;
+    try {
+      const meta = JSON.parse(first) as { type?: string; timestamp?: string; payload?: { cwd?: string; timestamp?: string } };
+      if (meta.type !== "session_meta" || !meta.payload || meta.payload.cwd !== session.cwd) continue;
+      const ts = Date.parse(meta.timestamp ?? meta.payload.timestamp ?? "");
+      if (Number.isFinite(ts) && Math.abs(ts - target) < 15 * 60_000) return file;
+    } catch {
+      continue;
+    }
+  }
+  return undefined;
 }
 
 function extractText(content: unknown): string {

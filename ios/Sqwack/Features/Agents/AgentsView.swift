@@ -10,53 +10,56 @@ struct AgentsView: View {
     }
 
     var body: some View {
-        NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 12) {
-                    HStack {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("Agents").font(.largeTitle.weight(.bold))
-                            Text("All agent sessions and activity")
-                                .font(.subheadline)
+        TimelineView(.periodic(from: .now, by: 1)) { timeline in
+            NavigationStack {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 12) {
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Agents").font(.largeTitle.weight(.bold))
+                                Text("All agent sessions and activity")
+                                    .font(.subheadline)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            Menu {
+                                Button("All Agents") { stateFilter = nil }
+                                ForEach(AgentState.allCases.filter { $0 != .unknown }, id: \.self) { state in
+                                    Button(state.shortLabel) { stateFilter = state }
+                                }
+                            } label: {
+                                HStack(spacing: 6) {
+                                    Text(stateFilter?.shortLabel ?? "All Agents")
+                                    Image(systemName: "chevron.down").font(.caption)
+                                }
+                                .padding(.horizontal, 14)
+                                .padding(.vertical, 8)
+                                .background(Capsule().fill(Color.consolePanelRaised))
+                                .overlay(Capsule().strokeBorder(Color.consoleStroke))
+                            }
+                        }
+                        .padding(.bottom, 8)
+
+                        ForEach(filtered) { session in
+                            SessionRow(session: session, now: timeline.date)
+                        }
+                        if filtered.isEmpty {
+                            Text("No sessions" + (stateFilter.map { " in state \($0.rawValue)" } ?? ""))
                                 .foregroundStyle(.secondary)
+                                .frame(maxWidth: .infinity, minHeight: 120)
                         }
-                        Spacer()
-                        Menu {
-                            Button("All Agents") { stateFilter = nil }
-                            ForEach(AgentState.allCases.filter { $0 != .unknown }, id: \.self) { state in
-                                Button(state.shortLabel) { stateFilter = state }
-                            }
-                        } label: {
-                            HStack(spacing: 6) {
-                                Text(stateFilter?.shortLabel ?? "All Agents")
-                                Image(systemName: "chevron.down").font(.caption)
-                            }
-                            .padding(.horizontal, 14)
-                            .padding(.vertical, 8)
-                            .background(Capsule().fill(Color(.secondarySystemBackground)))
-                        }
-                    }
-                    .padding(.bottom, 8)
 
-                    ForEach(filtered) { session in
-                        SessionRow(session: session)
+                        Text("Showing \(filtered.count) of \(store.sessions().count) agents")
+                            .font(.subheadline)
+                            .foregroundStyle(.tertiary)
+                            .frame(maxWidth: .infinity)
+                            .padding(.top, 8)
                     }
-                    if filtered.isEmpty {
-                        Text("No sessions" + (stateFilter.map { " in state \($0.rawValue)" } ?? ""))
-                            .foregroundStyle(.secondary)
-                            .frame(maxWidth: .infinity, minHeight: 120)
-                    }
-
-                    Text("Showing \(filtered.count) of \(store.sessions().count) agents")
-                        .font(.subheadline)
-                        .foregroundStyle(.tertiary)
-                        .frame(maxWidth: .infinity)
-                        .padding(.top, 8)
+                    .padding(24)
                 }
-                .padding(24)
+                .background(Color.consoleBackground)
+                .toolbar(.hidden, for: .navigationBar)
             }
-            .background(Color(.systemBackground))
-            .toolbar(.hidden, for: .navigationBar)
         }
     }
 }
@@ -64,6 +67,7 @@ struct AgentsView: View {
 private struct SessionRow: View {
     @Environment(SqwackStore.self) private var store
     let session: AgentSession
+    let now: Date
     @State private var showTranscript = false
 
     private var machineName: String {
@@ -72,9 +76,9 @@ private struct SessionRow: View {
 
     private var timeDetail: String {
         switch session.state {
-        case .working: "Running " + (session.startedAt ?? session.updatedAt).elapsedLabel
-        case .needsInput: "Waiting " + (session.waitingSince ?? session.updatedAt).elapsedLabel
-        default: session.updatedAt.agoLabel.sentenceCased
+        case .working: "Running " + (session.startedAt ?? session.updatedAt).elapsedLabel(at: now)
+        case .needsInput: "Waiting " + (session.waitingSince ?? session.updatedAt).elapsedLabel(at: now)
+        default: session.updatedAt.agoLabel(at: now).sentenceCased
         }
     }
 
@@ -132,7 +136,11 @@ private struct SessionRow: View {
                 .foregroundStyle(.tertiary)
         }
         .padding(18)
-        .background(RoundedRectangle(cornerRadius: 18).fill(Color(.secondarySystemBackground)))
+        .background(
+            RoundedRectangle(cornerRadius: 16)
+                .fill(Color.consolePanel)
+                .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(Color.consoleStroke))
+        )
         .contentShape(RoundedRectangle(cornerRadius: 18))
         .onTapGesture { showTranscript = true }
         .sheet(isPresented: $showTranscript) {
@@ -150,9 +158,16 @@ struct TranscriptView: View {
     let session: AgentSession
     @State private var transcript: Transcript?
     @State private var loading = true
+    @State private var loadFailed = false
 
     private var node: NodeConnection? {
         store.nodes.first { $0.machine?.id == session.machineId } ?? store.nodes.first
+    }
+
+    private var emptyDescription: String {
+        loadFailed
+            ? "The daemon request failed. Check the connection and try again."
+            : "This provider's session file could not be found on the Mac (short-lived or non-interactive sessions may not keep one)."
     }
 
     var body: some View {
@@ -175,11 +190,13 @@ struct TranscriptView: View {
                         .onAppear { proxy.scrollTo("bottom", anchor: .bottom) }
                     }
                 } else {
-                    ContentUnavailableView(
-                        "No transcript available",
-                        systemImage: "text.bubble",
-                        description: Text("This provider's session file could not be found on the Mac (short-lived or non-interactive sessions may not keep one).")
-                    )
+                    ContentUnavailableView {
+                        Label("No transcript available", systemImage: "text.bubble")
+                    } description: {
+                        Text(emptyDescription)
+                    } actions: {
+                        Button("Retry") { Task { await loadTranscript() } }
+                    }
                 }
             }
             .navigationTitle("\(session.provider.capitalized) · \(session.projectName ?? session.source)")
@@ -197,11 +214,17 @@ struct TranscriptView: View {
                 }
             }
             .task {
-                transcript = await node?.transcript(sessionId: session.id)
-                loading = false
+                await loadTranscript()
             }
         }
         .presentationDetents([.large])
+    }
+
+    private func loadTranscript() async {
+        loading = true
+        transcript = await node?.transcript(sessionId: session.id)
+        loadFailed = transcript == nil
+        loading = false
     }
 }
 
@@ -229,7 +252,7 @@ private struct MessageBubble: View {
             .padding(12)
             .background(
                 RoundedRectangle(cornerRadius: 14)
-                    .fill(isUser ? Color.blue.opacity(0.18) : Color(.secondarySystemBackground))
+                    .fill(isUser ? Color.blue.opacity(0.18) : Color.consolePanelRaised)
             )
             if !isUser { Spacer(minLength: 60) }
         }

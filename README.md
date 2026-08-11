@@ -1,198 +1,183 @@
 # Sqwack
 
-An ambient development activity monitor. A native iPad app (**Sqwack**) shows, at a
-glance from several feet away, whether anything in your development environment
-needs you — AI coding agents working / waiting for input / finished / failed,
-plus your running development services. A local macOS daemon (**sqwackd**)
-collects events from Claude Code and Codex via their official hook mechanisms
-and streams them to the iPad over LAN or Tailscale.
+Sqwack is a local status board for your development machine.
 
-No cloud backend. No remote shell. One machine for now; every schema carries a
-`machineId` so more machines can be added without a rewrite.
+It runs a small macOS daemon, `sqwackd`, and a native iPad app. The daemon watches
+your AI coding agents and local development services, then streams a live status
+view to the iPad over your LAN or Tailscale.
+
+No cloud backend. No remote shell. No source-code upload.
 
 ```text
-Claude / Codex / OS
-        |
-        v
-     sqwackd            (Mac, local daemon, SQLite, port 4737)
-        |
-   LAN / Tailscale
-        |
-        v
-   Sqwack iPad app      (SwiftUI, WebSocket live updates)
+AI agents + dev services
+          |
+          v
+       sqwackd              macOS daemon
+          |
+          v
+   LAN or Tailscale
+          |
+          v
+       Sqwack               iPad app
 ```
+
+## What It Shows
+
+- Agent state: working, waiting for input, done, failed, or idle.
+- Local dev services: process name, port, PID, and project directory.
+- Machine health: CPU, memory, top processes, and recent activity.
+- Read-only transcripts when the original provider session file is available.
+- Account usage where a supported local source exists.
+
+## How It Works
+
+- `sqwackd` runs locally on your Mac.
+- Agent integrations send small lifecycle events into the daemon.
+- The daemon stores recent events in SQLite under `~/.sqwack/`.
+- The iPad connects with a paired device token stored in Keychain.
+- Tailscale is recommended for private remote access.
 
 ## Requirements
 
-- macOS (tested on macOS 26)
-- Node.js >= 24 (`brew install node`)
-- Xcode 16+ with an iPadOS 18+ simulator or device (deployment target: **iPadOS 18.0**)
-- Optional: [Tailscale](https://tailscale.com) on both the Mac and the iPad for remote access
+- macOS
+- Node.js 24 or newer
+- Xcode 16 or newer
+- iPadOS 18 or newer
+- Tailscale, optional but recommended
 
-## Install the daemon
+## Install
 
 ```bash
-git clone <this repo>
-cd sqwack
+git clone https://github.com/CharlyApps/Sqwack.git
+cd Sqwack
+
 ./scripts/install-daemon.sh
-sqwackd setup                        # installs a LaunchAgent: starts now + at login
-sqwackd integrations install claude  # Claude Code lifecycle hooks
-sqwackd integrations install codex   # Codex notify hook
+sqwackd setup
 sqwackd status
 ```
 
-`sqwackd status` should report something like:
+Install agent integrations:
 
-```text
-Sqwack daemon          running
-Machine                Mac-mini
-Machine ID             83a847be-...
-Local API              ready on http://127.0.0.1:4737
-Tailscale              reachable (mac-mini.tailnet.ts.net)
-claude-code            native / active
-codex-cli              derived / active
-Active agents          0
-Development services   3
-Status                 quiet
+```bash
+sqwackd integrations install claude
+sqwackd integrations install codex
 ```
 
-Everything lives in `~/.sqwack/` (config, SQLite DB, tokens, logs, hook scripts).
-`sqwackd doctor` diagnoses common problems; `sqwackd logs -f` follows the log.
-After changing `~/.sqwack/config.json`, apply it with `sqwackd restart` —
-restarts never affect pairing (device credentials are persisted in SQLite and
-the iPad reconnects automatically).
-
-## Build & run the iPad app
+Open the iPad app:
 
 ```bash
 open ios/Sqwack.xcodeproj
 ```
 
-Select the **Sqwack** scheme and an iPad (simulator or device), then Run. There
-are no third-party Swift dependencies.
+Select the `Sqwack` scheme in Xcode and run it on an iPad simulator or device.
 
-## Set up Tailscale (recommended for remote access)
+## Pair The iPad
 
-Tailscale gives the iPad a private, encrypted path to the daemon from anywhere —
-no port forwarding, nothing exposed publicly. Skip this section if you only ever
-use the iPad on your home LAN.
-
-1. **On the Mac** — install Tailscale and sign in:
-
-   ```bash
-   brew install --cask tailscale-app
-   open -a Tailscale
-   ```
-
-   (or download from <https://tailscale.com/download/macos>). Sign in and note
-   the Mac's tailnet name — `sqwackd status` will show it once connected, e.g.
-   `mac-mini.your-tailnet.ts.net`.
-
-2. **On the iPad** — install the Tailscale app from the App Store and sign in
-   to the **same tailnet** (same account).
-
-3. **Tell the daemon to serve on the tailnet** — edit `~/.sqwack/config.json`:
-
-   ```json
-   "network": { "port": 4737, "bind": "127.0.0.1", "tailscaleServe": true }
-   ```
-
-   then restart the daemon:
-
-   ```bash
-   sqwackd setup
-   ```
-
-   With `tailscaleServe` on, the daemon stays bound to `127.0.0.1` and
-   Tailscale Serve proxies tailnet traffic to it — nothing listens on your LAN
-   or the public internet. Sqwack never uses Tailscale Funnel.
-
-4. Verify: `sqwackd status` should show `Tailscale  reachable (…)`, and
-   `sqwackd doctor` checks the whole chain.
-
-When pairing (next section), give the iPad the Tailscale address, e.g.
-`mac-mini.your-tailnet.ts.net` or the Mac's `100.x.y.z` Tailscale IP.
-
-## Pair the iPad
-
-1. On the Mac: make the daemon reachable from the iPad — either
-   - **Tailscale (recommended):** follow the section above, or
-   - **LAN only:** set `"bind": "0.0.0.0"` in `~/.sqwack/config.json` and
-     restart with `sqwackd setup`.
-2. Run `sqwackd pair`. It prints an 8-character single-use code (valid 5
-   minutes) and the addresses the iPad can use.
-3. In the app, enter the address and the code. The code is exchanged for a
-   long-lived device credential stored in the iOS Keychain. Revoke devices any
-   time with `sqwackd devices` / `sqwackd devices revoke <id>`.
-
-Pairing works identically over LAN and Tailscale; if both devices are on your
-tailnet the app keeps working away from home. The app reconnects automatically
-with exponential backoff and refreshes its full state after every reconnect.
-
-## See it work without real agents
+Start pairing on the Mac:
 
 ```bash
-sqwackd demo          # one realistic event cycle (working -> needs input -> done -> failure -> recovery)
-sqwackd demo --loop   # continuously
+sqwackd pair
 ```
 
-Within a second of each event the iPad updates: the Overview goes amber
-("NEEDS YOU") when an agent waits for input, red on failure, back to calm when
-resolved.
+The command prints a short code and the addresses the iPad can use. In the app,
+enter the daemon address and the pairing code.
 
-## Real agent events
+Pairing creates a long-lived device credential in the iOS Keychain. Revoke paired
+devices any time:
 
-- **Claude Code** (`native` confidence): SessionStart/UserPromptSubmit/
-  Notification/Stop/SessionEnd hooks map to started/working/needs_input/
-  finished/idle. A `Stop` means "finished a turn", not "your whole task is
-  done" — Sqwack words it that way on purpose.
-- **Codex** (CLI + desktop app): three channels, capability-detected — lifecycle
-  hooks in `~/.codex/hooks.json` give working/needs-input/finished/idle (trust
-  them once via `/hooks` inside Codex); a `sqwack-codex-exec` wrapper makes
-  non-interactive `codex exec` runs observable (including failures); and the
-  `notify` fallback reports turn completions with no trust step. An existing
-  `notify` program is chained, never replaced.
-- **Claude Desktop (chat app)**: no supported native event mechanism → reported
-  honestly; nothing is faked. See [docs/integrations.md](docs/integrations.md).
+```bash
+sqwackd devices
+sqwackd devices revoke <device-id>
+```
 
-Integrations bind per session: agents already running when hooks are installed
-won't report — start a new session/chat. Retention keeps the database small
-(events 14 days, sessions 30 days, automatic); `sqwackd prune [--all]` compacts
-on demand.
+## Tailscale
 
-Hook scripts always exit 0 and time out after 3s, so a stopped daemon can never
-block or slow your agents. Only session ids, project name/cwd, and short
-notification messages are transmitted — never prompt bodies or source code.
+Tailscale lets the iPad reach the daemon privately from anywhere without opening
+a public port.
 
-## Development processes
+Edit `~/.sqwack/config.json`:
 
-The **Development** tab lists listening dev services (node, java, python,
-databases, and common dev tools) with port, PID, and project directory. Kill is
-confirmation-gated, daemon-verified (the PID's start time must match what was
-listed, so a recycled PID is never killed), graceful (SIGTERM), and rate-limited.
-The daemon itself is protected. Arbitrary command execution does not exist.
+```json
+{
+  "network": {
+    "port": 4737,
+    "bind": "127.0.0.1",
+    "tailscaleServe": true
+  }
+}
+```
+
+Then apply the change:
+
+```bash
+sqwackd setup
+sqwackd doctor
+```
+
+Sqwack uses Tailscale Serve only. It does not use Tailscale Funnel.
+
+## Try Demo Data
+
+```bash
+sqwackd demo
+sqwackd demo --loop
+```
+
+The iPad should update as the demo cycles through working, waiting, done,
+failure, and recovery states.
+
+## Useful Commands
+
+```bash
+sqwackd status
+sqwackd doctor
+sqwackd logs -f
+sqwackd restart
+sqwackd prune
+sqwackd uninstall
+```
+
+## Privacy And Safety
+
+- The daemon is local-first and stores data under `~/.sqwack/`.
+- Device tokens are hashed at rest.
+- Pairing codes are short-lived and single-use.
+- Hook scripts time out quickly and always exit without blocking your agents.
+- The process kill action is confirmation-gated and PID-recycle checked.
+- There is no arbitrary command execution endpoint.
 
 ## Tests
 
+Daemon:
+
 ```bash
-cd daemon && npm test        # 28 daemon tests: reducer, validation, persistence, API, auth, installers
-cd ios && xcodebuild -project Sqwack.xcodeproj -scheme Sqwack \
+cd daemon
+npm test
+npm run typecheck
+```
+
+iPad app:
+
+```bash
+cd ios
+xcodebuild -project Sqwack.xcodeproj -scheme Sqwack \
   -destination 'platform=iOS Simulator,name=iPad Pro 13-inch (M5)' test
 ```
 
 ## Uninstall
 
 ```bash
-sqwackd uninstall            # removes the LaunchAgent
-rm /usr/local/bin/sqwackd    # or ~/.local/bin/sqwackd
+sqwackd uninstall
+rm /usr/local/bin/sqwackd
 rm -rf ~/.sqwack
 ```
 
-Integration changes are additive and backed up (`settings.json.sqwack-backup`,
-`config.toml.sqwack-backup`); remove the `sqwack-*` hook entries to detach them.
+If you installed agent integrations, remove the `sqwack-*` hook entries from the
+provider config files. Sqwack creates `.sqwack-backup` files before editing
+provider configs.
 
-## More documentation
+## Documentation
 
-- [docs/architecture.md](docs/architecture.md) — components, state reducer, multi-machine design
-- [docs/protocol.md](docs/protocol.md) — canonical event schema, REST + WebSocket wire protocol
-- [docs/integrations.md](docs/integrations.md) — per-integration support level and mapping
+- [Architecture](docs/architecture.md)
+- [Protocol](docs/protocol.md)
+- [Integrations](docs/integrations.md)

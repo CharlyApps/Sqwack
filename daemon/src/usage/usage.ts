@@ -16,24 +16,31 @@ export interface ProviderUsage {
   source: string;
 }
 
-const CODEX_SESSIONS = () => process.env.SQWACK_CODEX_SESSIONS ?? join(homedir(), ".codex", "sessions");
+export type UsageProvider = ProviderUsage["provider"];
 
-/** Newest file under sessions/YYYY/MM/DD/ without walking the whole tree. */
-function latestCodexSession(root: string): string | undefined {
-  let dir = root;
+const CODEX_SESSIONS = () => process.env.SQWACK_CODEX_SESSIONS ?? join(homedir(), ".codex", "sessions");
+let claudeUsageCooldownUntil = 0;
+
+/** Recent files under sessions/YYYY/MM/DD/, newest first, without walking old history. */
+function recentCodexSessions(root: string, limit = 25): string[] {
+  let days: string[] = [];
   try {
-    for (let depth = 0; depth < 3; depth++) {
-      const entries = readdirSync(dir).filter((e) => !e.startsWith(".")).sort().reverse();
-      if (entries.length === 0) return undefined;
-      dir = join(dir, entries[0]);
+    for (const year of readdirSync(root).filter((e) => !e.startsWith(".")).sort().reverse().slice(0, 2)) {
+      for (const month of readdirSync(join(root, year)).filter((e) => !e.startsWith(".")).sort().reverse()) {
+        for (const day of readdirSync(join(root, year, month)).filter((e) => !e.startsWith(".")).sort().reverse()) {
+          days.push(join(root, year, month, day));
+        }
+      }
     }
-    const files = readdirSync(dir)
-      .filter((f) => f.endsWith(".jsonl"))
-      .map((f) => ({ path: join(dir, f), mtime: statSync(join(dir, f)).mtimeMs }))
-      .sort((a, b) => b.mtime - a.mtime);
-    return files[0]?.path;
+    return days
+      .flatMap((dir) => readdirSync(dir)
+        .filter((f) => f.endsWith(".jsonl"))
+        .map((f) => ({ path: join(dir, f), mtime: statSync(join(dir, f)).mtimeMs })))
+      .sort((a, b) => b.mtime - a.mtime)
+      .slice(0, limit)
+      .map((f) => f.path);
   } catch {
-    return undefined;
+    return [];
   }
 }
 
@@ -62,8 +69,14 @@ function windowLabel(minutes: number): string {
  * change simply yields no usage — never fake numbers.
  */
 export function collectCodexUsage(root = CODEX_SESSIONS()): ProviderUsage | undefined {
-  const file = latestCodexSession(root);
-  if (!file) return undefined;
+  for (const file of recentCodexSessions(root)) {
+    const usage = collectCodexUsageFromFile(file);
+    if (usage) return usage;
+  }
+  return undefined;
+}
+
+function collectCodexUsageFromFile(file: string): ProviderUsage | undefined {
   const tail = tailOf(file);
   const index = tail.lastIndexOf('"rate_limits"');
   if (index === -1) return undefined;
@@ -117,6 +130,7 @@ function findKey(obj: unknown, key: string): unknown {
  * logged, and never leaves this machine — only percentages go to the iPad.
  */
 export async function collectClaudeUsage(): Promise<ProviderUsage | undefined> {
+  if (Date.now() < claudeUsageCooldownUntil) return undefined;
   let token: string | undefined;
   try {
     const { execFileSync } = await import("node:child_process");
@@ -134,6 +148,8 @@ export async function collectClaudeUsage(): Promise<ProviderUsage | undefined> {
       headers: { Authorization: `Bearer ${token}`, "anthropic-beta": "oauth-2025-04-20", "Content-Type": "application/json" },
       signal: AbortSignal.timeout(10_000),
     });
+    // ponytail: fixed cooldown is enough for 429s; expose provider error state if users need exact diagnostics.
+    if (res.status === 429) claudeUsageCooldownUntil = Date.now() + 30 * 60_000;
     if (!res.ok) return undefined;
     const body = (await res.json()) as Record<string, { utilization?: number; resets_at?: string | null } | null>;
     const windows: UsageWindow[] = [];
@@ -155,11 +171,11 @@ export async function collectClaudeUsage(): Promise<ProviderUsage | undefined> {
 }
 
 /** All providers, best-effort each; a failing provider simply has no entry. */
-export async function collectUsage(): Promise<ProviderUsage[]> {
+export async function collectUsage(provider?: UsageProvider): Promise<ProviderUsage[]> {
   const usage: ProviderUsage[] = [];
   const [codex, claude] = await Promise.all([
-    Promise.resolve(collectCodexUsage()),
-    collectClaudeUsage(),
+    provider === "claude" ? undefined : Promise.resolve(collectCodexUsage()),
+    provider === "codex" ? undefined : collectClaudeUsage(),
   ]);
   if (claude) usage.push(claude);
   if (codex) usage.push(codex);

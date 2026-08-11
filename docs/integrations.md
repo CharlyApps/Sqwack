@@ -84,7 +84,7 @@ The Overview shows provider usage meters where a *local, native* data source
 exists — no reverse-engineered network calls:
 
 - **Codex**: rate-limit snapshots (used %, window, reset time, plan) that Codex
-  itself writes into its session rollout files. Refreshed every 2 minutes.
+  itself writes into its session rollout files. Refreshed manually from the app.
 - **Claude**: Claude Code exposes no account rate-limit data in any local file
   (verified against transcripts) — so no meter is shown rather than a fake one.
   The adapter slot exists (`daemon/src/usage/usage.ts`) for when it does.

@@ -176,6 +176,13 @@ test("kill validates process id", async () => {
   assert.equal(res.status, 404);
 });
 
+test("usage refresh validates provider", async () => {
+  const res = await fetch(`${BASE}/v1/usage/refresh`, {
+    method: "POST", headers: authed(admin), body: JSON.stringify({ provider: "nope" }),
+  });
+  assert.equal(res.status, 400);
+});
+
 test("session ack clears attention", async () => {
   await fetch(`${BASE}/v1/events`, {
     method: "POST", headers: authed(admin),

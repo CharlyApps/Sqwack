@@ -71,9 +71,10 @@ async function processDetails(pids: number[]): Promise<Map<number, { started: Da
   return map;
 }
 
-function categorize(command: string, fullCommand: string): DevProcess["category"] | undefined {
+export function categorize(command: string, fullCommand: string): DevProcess["category"] | undefined {
   const base = basename(command).toLowerCase();
   for (const [re, cat] of CATEGORY) if (re.test(base)) return cat;
+  if (/\/bin\/(?:Debug|Release)\/net[\w.-]+\//i.test(fullCommand)) return "other";
   if (DEV_HINTS.test(base) || DEV_HINTS.test(fullCommand)) return "other";
   return undefined; // not a development process
 }

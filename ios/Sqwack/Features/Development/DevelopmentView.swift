@@ -8,53 +8,55 @@ struct DevelopmentView: View {
     @State private var killing = false
 
     var body: some View {
-        NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 20) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Development").font(.largeTitle.weight(.bold))
-                        Text("Services, processes and system health")
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
+        TimelineView(.periodic(from: .now, by: 1)) { timeline in
+            NavigationStack {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 20) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Development").font(.largeTitle.weight(.bold))
+                            Text("Services, processes and system health")
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                        }
+
+                        ServicesTable(now: timeline.date, onKill: { confirmKill = $0 })
+
+                        HStack(alignment: .top, spacing: 20) {
+                            ResourcePanel()
+                            RecentOutputPanel()
+                            SystemHealthPanel()
+                        }
+
+                        TopProcessesPanel()
                     }
-
-                    ServicesTable(onKill: { confirmKill = $0 })
-
-                    HStack(alignment: .top, spacing: 20) {
-                        ResourcePanel()
-                        RecentOutputPanel()
-                        SystemHealthPanel()
+                    .padding(24)
+                }
+                .background(Color.consoleBackground)
+                .toolbar(.hidden, for: .navigationBar)
+                .refreshable {
+                    await store.refreshProcesses()
+                }
+                .confirmationDialog(
+                    "Kill \(confirmKill?.name ?? "")?",
+                    isPresented: Binding(get: { confirmKill != nil }, set: { if !$0 { confirmKill = nil } }),
+                    titleVisibility: .visible
+                ) {
+                    let killLabel: String = "Kill PID \(confirmKill?.pid ?? 0)" + (confirmKill?.port.map { " on :\($0)" } ?? "")
+                    Button(killLabel, role: .destructive) {
+                        if let process = confirmKill { kill(process) }
                     }
-
-                    TopProcessesPanel()
+                    Button("Cancel", role: .cancel) { confirmKill = nil }
+                } message: {
+                    Text("The daemon verifies the process still exists before terminating it (SIGTERM).")
                 }
-                .padding(24)
-            }
-            .background(Color(.systemBackground))
-            .toolbar(.hidden, for: .navigationBar)
-            .refreshable {
-                for node in store.nodes { await node.refreshSnapshot() }
-            }
-            .confirmationDialog(
-                "Kill \(confirmKill?.name ?? "")?",
-                isPresented: Binding(get: { confirmKill != nil }, set: { if !$0 { confirmKill = nil } }),
-                titleVisibility: .visible
-            ) {
-                let killLabel: String = "Kill PID \(confirmKill?.pid ?? 0)" + (confirmKill?.port.map { " on :\($0)" } ?? "")
-                Button(killLabel, role: .destructive) {
-                    if let process = confirmKill { kill(process) }
+                .alert("Kill failed", isPresented: Binding(get: { killError != nil }, set: { if !$0 { killError = nil } })) {
+                    Button("OK") { killError = nil }
+                } message: {
+                    Text(killError ?? "")
                 }
-                Button("Cancel", role: .cancel) { confirmKill = nil }
-            } message: {
-                Text("The daemon verifies the process still exists before terminating it (SIGTERM).")
-            }
-            .alert("Kill failed", isPresented: Binding(get: { killError != nil }, set: { if !$0 { killError = nil } })) {
-                Button("OK") { killError = nil }
-            } message: {
-                Text(killError ?? "")
-            }
-            .overlay {
-                if killing { ProgressView("Terminating…") }
+                .overlay {
+                    if killing { ProgressView("Terminating…") }
+                }
             }
         }
     }
@@ -69,7 +71,7 @@ struct DevelopmentView: View {
             } catch {
                 killError = error.localizedDescription
             }
-            await node.refreshSnapshot()
+            await node.refreshProcesses()
         }
     }
 }
@@ -78,6 +80,7 @@ struct DevelopmentView: View {
 
 private struct ServicesTable: View {
     @Environment(SqwackStore.self) private var store
+    let now: Date
     let onKill: (DevProcess) -> Void
 
     var body: some View {
@@ -85,7 +88,7 @@ private struct ServicesTable: View {
         Panel(title: "SERVICES", badge: "\(processes.count) running") {
             Grid(alignment: .leading, horizontalSpacing: 18, verticalSpacing: 12) {
                 GridRow {
-                    ForEach(["PORT", "NAME", "TYPE", "PID", "PATH", "STATUS", "UPTIME", "CPU", "MEMORY", "ACTION"], id: \.self) { header in
+                    ForEach(["PORT", "NAME", "TYPE", "PID", "PATH", "STATUS", "UPTIME", "CPU", "MEMORY", "ACTIONS"], id: \.self) { header in
                         Text(header).font(.caption.weight(.semibold)).foregroundStyle(.tertiary)
                     }
                 }
@@ -101,7 +104,7 @@ private struct ServicesTable: View {
                         Text(process.category ?? "other")
                             .font(.caption.weight(.medium))
                             .padding(.horizontal, 8).padding(.vertical, 3)
-                            .background(Capsule().fill(Color(.tertiarySystemFill)))
+                            .background(Capsule().fill(Color.white.opacity(0.07)))
                             .foregroundStyle(.secondary)
                         Text(verbatim: "\(process.pid)").font(.body.monospacedDigit()).foregroundStyle(.secondary)
                         Text(process.cwd ?? "—")
@@ -115,7 +118,7 @@ private struct ServicesTable: View {
                             .padding(.horizontal, 9).padding(.vertical, 3)
                             .background(Capsule().strokeBorder(.green.opacity(0.6)))
                             .foregroundStyle(.green)
-                        Text(process.startedAt.map { Format.uptime(Int(Date.now.timeIntervalSince($0))) } ?? "—")
+                        Text(process.startedAt.map { Format.uptime(Int(now.timeIntervalSince($0))) } ?? "—")
                             .font(.body.monospacedDigit())
                             .foregroundStyle(.secondary)
                             .fixedSize()
@@ -129,13 +132,7 @@ private struct ServicesTable: View {
                         Text(process.memoryBytes.map { Format.bytes($0) } ?? "—")
                             .font(.body.monospacedDigit())
                             .foregroundStyle(.secondary)
-                        if process.killable {
-                            Button("Kill", role: .destructive) { onKill(process) }
-                                .buttonStyle(.bordered)
-                                .controlSize(.small)
-                        } else {
-                            Text("protected").font(.caption).foregroundStyle(.tertiary)
-                        }
+                        ProcessActions(process: process, onKill: onKill)
                     }
                 }
                 if processes.isEmpty {
@@ -147,6 +144,30 @@ private struct ServicesTable: View {
                 }
             }
         }
+    }
+}
+
+private struct ProcessActions: View {
+    let process: DevProcess
+    let onKill: (DevProcess) -> Void
+
+    var body: some View {
+        Menu {
+            if process.killable {
+                Button("Kill", systemImage: "xmark.octagon", role: .destructive) {
+                    onKill(process)
+                }
+            } else {
+                Text("Protected")
+            }
+        } label: {
+            Image(systemName: "ellipsis.circle")
+                .font(.title3)
+                .frame(width: 32, height: 28)
+        }
+        .menuStyle(.button)
+        .buttonStyle(.borderless)
+        .help("Process actions")
     }
 }
 
@@ -304,7 +325,7 @@ private struct TopProcessesPanel: View {
                         Text(verbatim: "\(index + 1)")
                             .font(.caption.weight(.bold))
                             .frame(width: 22, height: 22)
-                            .background(Circle().fill(Color(.tertiarySystemFill)))
+                            .background(Circle().fill(Color.white.opacity(0.07)))
                             .foregroundStyle(.secondary)
                         VStack(alignment: .leading, spacing: 2) {
                             Text(metric.name).font(.callout.weight(.medium)).lineLimit(1)
@@ -318,7 +339,7 @@ private struct TopProcessesPanel: View {
                     }
                     .padding(12)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(RoundedRectangle(cornerRadius: 12).fill(Color(.tertiarySystemBackground)))
+                    .background(RoundedRectangle(cornerRadius: 12).fill(Color.consolePanelRaised))
                 }
                 if store.topProcesses.isEmpty {
                     Text("Waiting for process metrics…").foregroundStyle(.tertiary)

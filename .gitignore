@@ -1,5 +1,14 @@
 node_modules/
 .DS_Store
 *.sqwack-backup
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
 ios/build/
 DerivedData/
+xcuserdata/
+*.xcuserstate

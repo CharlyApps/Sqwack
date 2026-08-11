@@ -48,6 +48,11 @@ extension SqwackStatus {
 
 extension Color {
     static let amber = Color(red: 1.0, green: 0.72, blue: 0.2)
+    static let consoleBackground = Color(red: 0.015, green: 0.027, blue: 0.043)
+    static let consolePanel = Color(red: 0.045, green: 0.070, blue: 0.095)
+    static let consolePanelRaised = Color(red: 0.060, green: 0.085, blue: 0.112)
+    static let consoleStroke = Color.white.opacity(0.115)
+    static let consoleStrokeBright = Color.white.opacity(0.18)
 }
 
 extension String {
@@ -61,17 +66,38 @@ extension String {
 extension Date {
     /// Compact elapsed time: "08:42" under an hour, "3h 12m" beyond.
     var elapsedLabel: String {
-        let seconds = max(0, Int(Date.now.timeIntervalSince(self)))
+        elapsedLabel(at: .now)
+    }
+
+    func elapsedLabel(at now: Date) -> String {
+        let seconds = max(0, Int(now.timeIntervalSince(self)))
         if seconds < 3600 { return String(format: "%02d:%02d", seconds / 60, seconds % 60) }
         return "\(seconds / 3600)h \(seconds % 3600 / 60)m"
     }
 
     var agoLabel: String {
-        let seconds = max(0, Int(Date.now.timeIntervalSince(self)))
+        agoLabel(at: .now)
+    }
+
+    func agoLabel(at now: Date) -> String {
+        let seconds = max(0, Int(now.timeIntervalSince(self)))
         if seconds < 60 { return "just now" }
         if seconds < 3600 { return "\(seconds / 60)m ago" }
         if seconds < 86400 { return "\(seconds / 3600)h ago" }
         return "\(seconds / 86400)d ago"
+    }
+
+    func preciseRemainingLabel(until future: Date) -> String {
+        let totalMinutes = max(0, Int(future.timeIntervalSince(self)) / 60)
+        if totalMinutes == 0 { return "<1m" }
+        let days = totalMinutes / 1440
+        let hours = (totalMinutes % 1440) / 60
+        let minutes = totalMinutes % 60
+        var parts: [String] = []
+        if days > 0 { parts.append("\(days)d") }
+        if hours > 0 { parts.append("\(hours)h") }
+        if minutes > 0 { parts.append("\(minutes)m") }
+        return parts.joined(separator: " ")
     }
 }
 

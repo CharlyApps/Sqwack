@@ -51,6 +51,18 @@ final class SqwackStore {
         nodes.removeAll { $0 === node }
     }
 
+    func refreshUsage(provider: String? = nil) async {
+        for node in nodes {
+            await node.refreshUsage(provider: provider)
+        }
+    }
+
+    func refreshProcesses() async {
+        for node in nodes {
+            await node.refreshProcesses()
+        }
+    }
+
     // MARK: - Aggregation (machineId == nil means "all machines")
 
     func sessions(machineId: String? = nil) -> [AgentSession] {
@@ -78,6 +90,7 @@ final class SqwackStore {
         guard let m = nodes.first?.machine else { return "" }
         return "\(m.platform)/\(m.architecture)"
     }
+    var daemonVersion: String { nodes.first?.machine?.daemonVersion ?? "0.1.0" }
 
     var usage: [ProviderUsage] {
         nodes.flatMap(\.usage).sorted { $0.provider < $1.provider }

@@ -27,12 +27,14 @@ final class NodeConnection {
     private var reconnectAttempt = 0
     private var closed = false
     private let session = URLSession(configuration: .default)
+    private static let usageCachePrefix = "sqwack.usage."
 
     var token: String? { Keychain.load(ref: credentialRef) }
 
     init(endpoint: URL, credentialRef: String) {
         self.endpoint = endpoint
         self.credentialRef = credentialRef
+        self.usage = Self.cachedUsage(ref: credentialRef)
     }
 
     // MARK: - Lifecycle
@@ -92,7 +94,7 @@ final class NodeConnection {
             status = snapshot.status
             sessions = Dictionary(uniqueKeysWithValues: snapshot.sessions.map { ($0.id, $0) })
             processes = snapshot.processes
-            usage = snapshot.usage ?? []
+            applyUsage(snapshot.usage ?? [])
             system = snapshot.system
             topProcesses = snapshot.topProcesses ?? []
             activity = snapshot.activity ?? []
@@ -102,7 +104,7 @@ final class NodeConnection {
         case .processesUpdated(let procs):
             processes = procs
         case .usageUpdated(let newUsage):
-            usage = newUsage
+            applyUsage(newUsage)
         case .systemUpdated(let newSystem):
             system = newSystem
         case .statusUpdated(let newStatus):
@@ -155,17 +157,32 @@ final class NodeConnection {
         }
     }
 
+    func refreshProcesses() async {
+        struct Wrapper: Codable { var processes: [DevProcess] }
+        guard let data = try? await request("/v1/processes"),
+              let wrapper = try? JSONDecoder.sqwack.decode(Wrapper.self, from: data) else { return }
+        await handle(.processesUpdated(wrapper.processes))
+    }
+
+    func refreshUsage(provider: String? = nil) async {
+        struct Wrapper: Codable { var usage: [ProviderUsage] }
+        let body = try? JSONEncoder().encode(provider.map { ["provider": $0] } ?? [:])
+        guard let data = try? await request("/v1/usage/refresh", method: "POST", body: body),
+              let wrapper = try? JSONDecoder.sqwack.decode(Wrapper.self, from: data) else { return }
+        await handle(.usageUpdated(wrapper.usage))
+    }
+
     func kill(process: DevProcess) async throws {
         _ = try await request("/v1/processes/\(process.id)/kill", method: "POST")
     }
 
     func acknowledge(session sessionId: String) async {
-        let escaped = sessionId.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? sessionId
+        let escaped = pathComponent(sessionId)
         _ = try? await request("/v1/sessions/\(escaped)/ack", method: "POST")
     }
 
     func transcript(sessionId: String) async -> Transcript? {
-        let escaped = sessionId.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? sessionId
+        let escaped = pathComponent(sessionId)
         guard let data = try? await request("/v1/sessions/\(escaped)/transcript") else { return nil }
         return try? JSONDecoder.sqwack.decode(Transcript.self, from: data)
     }
@@ -197,5 +214,25 @@ final class NodeConnection {
             throw NSError(domain: "sqwack", code: 1, userInfo: [NSLocalizedDescriptionKey: message])
         }
         return try JSONDecoder.sqwack.decode(PairResponse.self, from: data)
+    }
+
+    private func pathComponent(_ value: String) -> String {
+        var allowed = CharacterSet.urlPathAllowed
+        allowed.remove(charactersIn: "/?#[]@!$&'()*+,;=")
+        return value.addingPercentEncoding(withAllowedCharacters: allowed) ?? value
+    }
+
+    private func applyUsage(_ newUsage: [ProviderUsage]) {
+        guard !newUsage.isEmpty else { return }
+        usage = newUsage
+        if let data = try? JSONEncoder().encode(newUsage) {
+            UserDefaults.standard.set(data, forKey: Self.usageCachePrefix + credentialRef)
+        }
+    }
+
+    private static func cachedUsage(ref: String) -> [ProviderUsage] {
+        guard let data = UserDefaults.standard.data(forKey: usageCachePrefix + ref),
+              let usage = try? JSONDecoder().decode([ProviderUsage].self, from: data) else { return [] }
+        return usage
     }
 }

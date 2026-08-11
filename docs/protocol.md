@@ -114,6 +114,7 @@ interface SystemSnapshot {   // host machine stats + last ~10min history
 | `POST /v1/sessions/:id/ack` | yes | acknowledge (clears attention/failure hold) |
 | `GET /v1/sessions/:id/transcript` | yes | conversation read live from the provider's own files (never persisted by Sqwack) |
 | `GET /v1/processes` | yes | fresh discovery of listening dev processes |
+| `POST /v1/usage/refresh` | yes | refresh provider usage on demand; optional body `{ provider: "codex" \| "claude" }` → `{ usage }` |
 | `POST /v1/processes/:id/kill` | yes (rate-limited) | verify identity → SIGTERM → `{ outcome: "exited" \| "terminating" }`; `404` unknown id, `409` refused |
 | `GET /v1/integrations` | yes | `IntegrationCapability[]` |
 | `GET /v1/devices` | yes | paired devices |
@@ -128,7 +129,7 @@ type ServerMessage =
   | { type: "event";             data: SqwackEvent }
   | { type: "session.updated";   data: AgentSession }
   | { type: "processes.updated"; data: DevProcess[] }  // every ~20s and after kills
-  | { type: "usage.updated";     data: ProviderUsage[] } // every ~2min, on change
+  | { type: "usage.updated";     data: ProviderUsage[] } // after manual refresh, on change
   | { type: "system.updated";    data: SystemSnapshot }  // every ~10s
   | { type: "status.updated";    data: SqwackStatus }  // only on change
   | { type: "heartbeat";         timestamp: string };  // every 30s

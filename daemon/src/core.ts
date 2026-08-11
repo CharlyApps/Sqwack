@@ -4,7 +4,7 @@ import type { Config } from "./config.ts";
 import { machineInfo } from "./config.ts";
 import { reduceEvent, sessionKey, computeStatus, attentionSessions, sweepStale } from "./sessions/reducer.ts";
 import { discoverProcesses } from "./processes/discovery.ts";
-import { collectUsage, type ProviderUsage } from "./usage/usage.ts";
+import { collectUsage, type ProviderUsage, type UsageProvider } from "./usage/usage.ts";
 import { collectSystemStats, topProcesses, type ProcessMetric } from "./system/stats.ts";
 import type { ActivityItem, SystemSnapshot } from "./types.ts";
 import { log } from "./log.ts";
@@ -19,6 +19,7 @@ export class Engine {
   private processMetrics = new Map<number, ProcessMetric>();
   private top: ProcessMetric[] = [];
   private serviceCpuHistory = new Map<number, number[]>();
+  private usageRefreshes = new Map<string, Promise<void>>();
 
   public store: Store;
   public config: Config;
@@ -152,8 +153,25 @@ export class Engine {
     return this.processes;
   }
 
-  async refreshUsage(): Promise<void> {
-    const usage = await collectUsage();
+  async refreshUsage(provider?: UsageProvider): Promise<void> {
+    const key = provider ?? "all";
+    const active = this.usageRefreshes.get(key);
+    if (active) return active;
+    const refresh = this.refreshUsageNow(provider).finally(() => { this.usageRefreshes.delete(key); });
+    this.usageRefreshes.set(key, refresh);
+    return refresh;
+  }
+
+  private async refreshUsageNow(provider?: UsageProvider): Promise<void> {
+    const fresh = await collectUsage(provider);
+    const cutoff = Date.now() - 15 * 60_000;
+    // ponytail: short stale window smooths transient 429/offline reads; add per-provider error state if users need diagnostics.
+    const usage = this.usage.filter((u) => Date.parse(u.collectedAt) > cutoff);
+    for (const item of fresh) {
+      const i = usage.findIndex((u) => u.provider === item.provider);
+      if (i === -1) usage.push(item);
+      else usage[i] = item;
+    }
     if (JSON.stringify(usage.map(u => ({...u, collectedAt: ""}))) !== JSON.stringify(this.usage.map(u => ({...u, collectedAt: ""})))) {
       this.broadcast({ type: "usage.updated", data: usage });
     }

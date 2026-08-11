@@ -33,6 +33,7 @@ struct ProviderBadge: View {
         switch provider.lowercased() {
         case "claude": .orange
         case "codex": .blue
+        case "openai", "openai api": .green
         case "deepseek": .purple
         default: .gray
         }
@@ -42,6 +43,7 @@ struct ProviderBadge: View {
         switch provider.lowercased() {
         case "claude": "rays"
         case "codex": "cube.fill"
+        case "openai", "openai api": "sparkles"
         default: "sparkles"
         }
     }
@@ -92,7 +94,11 @@ struct Panel<Content: View>: View {
         }
         .padding(20)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(RoundedRectangle(cornerRadius: 20).fill(Color(.secondarySystemBackground)))
+        .background(
+            RoundedRectangle(cornerRadius: 16)
+                .fill(Color.consolePanel)
+                .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(Color.consoleStroke))
+        )
     }
 }
 
@@ -105,7 +111,7 @@ struct MeterBar: View {
     var body: some View {
         GeometryReader { geo in
             ZStack(alignment: .leading) {
-                Capsule().fill(Color(.tertiarySystemFill))
+                Capsule().fill(Color.white.opacity(0.08))
                 Capsule()
                     .fill(color)
                     .frame(width: max(height, geo.size.width * min(max(fraction, 0), 1)))
@@ -127,7 +133,7 @@ struct Chip: View {
         }
         .padding(.horizontal, 9)
         .padding(.vertical, 4)
-        .background(Capsule().fill(Color(.tertiarySystemFill)))
+        .background(Capsule().fill(Color.white.opacity(0.07)))
         .foregroundStyle(.secondary)
     }
 }
