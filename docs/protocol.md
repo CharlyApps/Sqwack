@@ -98,6 +98,10 @@ interface SystemSnapshot {   // host machine stats + last ~10min history
 // cpuPercent / memoryBytes / cpuHistory.
 ```
 
+`Snapshot.hermes`, when present, contains local Hermes gateways grouped by
+profile, their validated state/platforms/active-agent count, and safe cron
+metadata (name, schedule, next/last run, status, error category, delivery).
+
 ## REST endpoints
 
 | Method & path | Auth | Description |
@@ -105,10 +109,11 @@ interface SystemSnapshot {   // host machine stats + last ~10min history
 | `GET /v1/health` | none | `{ status, version, machineId }` |
 | `POST /v1/pair` | none (rate-limited) | body `{ code, deviceName }` → `{ token, deviceId, machine }`; codes are single-use, 5-min expiry |
 | `POST /v1/pair/start` | admin | begin pairing → `{ code, expiresAt }` |
-| `GET /v1/snapshot` | yes | `{ machine, status, sessions, attention, processes, usage, system, topProcesses, activity, connectedAt }` |
+| `GET /v1/snapshot` | yes | `{ machine, status, sessions, attention, processes, usage, system, topProcesses, activity, hermes?, connectedAt }` |
 | `POST /v1/events` | yes | ingest a canonical event; `202` accepted, `200` + `duplicate: true`, `400` invalid |
 | `POST /v1/hooks/claude` | admin | raw Claude Code hook payload → normalized + ingested |
 | `POST /v1/hooks/codex` | admin | raw Codex notify payload → normalized + ingested |
+| `POST /v1/hooks/hermes` | admin | sanitized Hermes gateway lifecycle payload → normalized + ingested |
 | `GET /v1/sessions` | yes | filters: `state`, `provider`, `project`, `machineId` (or `all`) |
 | `GET /v1/sessions/:id` | yes | one session |
 | `POST /v1/sessions/:id/ack` | yes | acknowledge (clears attention/failure hold) |
@@ -131,6 +136,7 @@ type ServerMessage =
   | { type: "processes.updated"; data: DevProcess[] }  // every ~20s and after kills
   | { type: "usage.updated";     data: ProviderUsage[] } // after manual refresh, on change
   | { type: "system.updated";    data: SystemSnapshot }  // every ~10s
+  | { type: "hermes.updated";    data: HermesSnapshot }  // local profile/runtime/cron changes
   | { type: "status.updated";    data: SqwackStatus }  // only on change
   | { type: "heartbeat";         timestamp: string };  // every 30s
 ```

@@ -71,6 +71,7 @@ Install agent integrations:
 ```bash
 sqwackd integrations install claude
 sqwackd integrations install codex
+sqwackd integrations install hermes
 ```
 
 Open the iPad app:

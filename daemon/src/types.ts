@@ -112,6 +112,39 @@ export interface IntegrationCapability {
   confidence: "native" | "derived" | "best_effort";
 }
 
+export interface HermesPlatform {
+  name: string;
+  state: string;
+}
+
+export interface HermesCronJob {
+  id: string;
+  jobId: string;
+  name: string;
+  enabled: boolean;
+  state?: string;
+  schedule: string;
+  nextRunAt?: string;
+  lastRunAt?: string;
+  lastStatus?: string;
+  errorKind?: string;
+  delivery?: string;
+}
+
+export interface HermesGateway {
+  profile: string;
+  running: boolean;
+  state: string;
+  activeAgents: number;
+  platforms: HermesPlatform[];
+  cronJobs: HermesCronJob[];
+}
+
+export interface HermesSnapshot {
+  gateways: HermesGateway[];
+  updatedAt: string;
+}
+
 export interface Snapshot {
   machine: Machine;
   status: SqwackStatus;
@@ -122,6 +155,7 @@ export interface Snapshot {
   system?: SystemSnapshot;
   topProcesses?: import("./system/stats.ts").ProcessMetric[];
   activity?: ActivityItem[];
+  hermes?: HermesSnapshot;
   connectedAt: string;
 }
 
@@ -137,6 +171,7 @@ export type ServerMessage =
   | { type: "processes.updated"; data: DevProcess[] }
   | { type: "usage.updated"; data: import("./usage/usage.ts").ProviderUsage[] }
   | { type: "system.updated"; data: SystemSnapshot }
+  | { type: "hermes.updated"; data: HermesSnapshot }
   | { type: "status.updated"; data: SqwackStatus }
   | { type: "heartbeat"; timestamp: string };
 

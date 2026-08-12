@@ -163,6 +163,41 @@ struct Transcript: Codable, Equatable {
     var messages: [TranscriptMessage]
 }
 
+struct HermesPlatform: Codable, Equatable, Identifiable {
+    var name: String
+    var state: String
+    var id: String { name }
+}
+
+struct HermesCronJob: Codable, Equatable, Identifiable {
+    var id: String
+    var jobId: String
+    var name: String
+    var enabled: Bool
+    var state: String?
+    var schedule: String
+    var nextRunAt: Date?
+    var lastRunAt: Date?
+    var lastStatus: String?
+    var errorKind: String?
+    var delivery: String?
+}
+
+struct HermesGateway: Codable, Equatable, Identifiable {
+    var profile: String
+    var running: Bool
+    var state: String
+    var activeAgents: Int
+    var platforms: [HermesPlatform]
+    var cronJobs: [HermesCronJob]
+    var id: String { profile }
+}
+
+struct HermesSnapshot: Codable, Equatable {
+    var gateways: [HermesGateway]
+    var updatedAt: Date
+}
+
 struct Snapshot: Codable {
     var machine: Machine
     var status: SqwackStatus
@@ -173,6 +208,7 @@ struct Snapshot: Codable {
     var system: SystemSnapshot?
     var topProcesses: [ProcessMetric]?
     var activity: [ActivityItem]?
+    var hermes: HermesSnapshot?
     var connectedAt: Date
 }
 
@@ -183,6 +219,7 @@ enum ServerMessage {
     case processesUpdated([DevProcess])
     case usageUpdated([ProviderUsage])
     case systemUpdated(SystemSnapshot)
+    case hermesUpdated(HermesSnapshot)
     case statusUpdated(SqwackStatus)
     case heartbeat
     case unknown
@@ -210,6 +247,9 @@ extension ServerMessage {
         case "system.updated":
             guard let p = try? decoder.decode(Payload<SystemSnapshot>.self, from: data) else { return .unknown }
             return .systemUpdated(p.data)
+        case "hermes.updated":
+            guard let p = try? decoder.decode(Payload<HermesSnapshot>.self, from: data) else { return .unknown }
+            return .hermesUpdated(p.data)
         case "status.updated":
             guard let p = try? decoder.decode(Payload<SqwackStatus>.self, from: data) else { return .unknown }
             return .statusUpdated(p.data)

@@ -195,6 +195,18 @@ test("codex notify normalization end-to-end", async () => {
   assert.equal(session.state, "done");
 });
 
+test("Hermes gateway hook normalization end-to-end", async () => {
+  const res = await fetch(`${BASE}/v1/hooks/hermes`, {
+    method: "POST", headers: authed(admin),
+    body: JSON.stringify({ event_type: "agent:start", profile: "writer", platform: "slack", session_id: "h1", message: "private" }),
+  });
+  assert.equal(res.status, 202);
+  const session = (await (await fetch(`${BASE}/v1/sessions/${encodeURIComponent("hermes:h1")}`, { headers: authed(admin) })).json()) as { state: string; projectName: string; metadata: Record<string, unknown> };
+  assert.equal(session.state, "working");
+  assert.equal(session.projectName, "writer");
+  assert.ok(!JSON.stringify(session).includes("private"));
+});
+
 test("kill validates process id", async () => {
   const res = await fetch(`${BASE}/v1/processes/999999-zz/kill`, { method: "POST", headers: authed(admin) });
   assert.equal(res.status, 404);

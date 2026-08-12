@@ -39,6 +39,22 @@ final class SqwackTests: XCTestCase {
         XCTAssertEqual(session.state, .done)
     }
 
+    func testHermesUpdateDecoding() throws {
+        let json = """
+        {"type":"hermes.updated","data":{"updatedAt":"2026-08-10T12:01:00Z","gateways":[{
+          "profile":"writer","running":true,"state":"running","activeAgents":1,
+          "platforms":[{"name":"slack","state":"connected"}],
+          "cronJobs":[{"id":"writer:daily","jobId":"daily","name":"Daily report","enabled":true,
+                       "schedule":"Every 60 min","nextRunAt":"2026-08-10T13:00:00Z","delivery":"slack"}]
+        }]}}
+        """
+        guard case .hermesUpdated(let snapshot) = ServerMessage.decode(Data(json.utf8)) else {
+            return XCTFail("expected hermes.updated")
+        }
+        XCTAssertEqual(snapshot.gateways.first?.profile, "writer")
+        XCTAssertEqual(snapshot.gateways.first?.cronJobs.first?.delivery, "slack")
+    }
+
     func testUnknownStateAndStatusFallBackSafely() throws {
         let json = """
         {"type":"session.updated","data":{"id":"x","machineId":"m1","provider":"codex",

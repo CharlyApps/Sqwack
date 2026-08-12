@@ -49,6 +49,7 @@ struct ProviderBadge: View {
         case "codex": .blue
         case "openai", "openai api": .green
         case "deepseek": .purple
+        case "hermes": .mint
         default: .gray
         }
     }
@@ -58,6 +59,7 @@ struct ProviderBadge: View {
         case "claude": "rays"
         case "codex": "cube.fill"
         case "openai", "openai api": "sparkles"
+        case "hermes": "wing.side.right"
         default: "sparkles"
         }
     }

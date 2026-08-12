@@ -3,16 +3,20 @@ import assert from "node:assert/strict";
 import { mkdtempSync, readFileSync, writeFileSync, rmSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { execFileSync } from "node:child_process";
 
 const dir = mkdtempSync(join(tmpdir(), "sqwack-install-"));
 process.env.SQWACK_DATA_DIR = join(dir, "data");
 process.env.SQWACK_CLAUDE_SETTINGS = join(dir, "claude", "settings.json");
 process.env.SQWACK_CODEX_CONFIG = join(dir, "codex", "config.toml");
 process.env.SQWACK_CODEX_HOOKS = join(dir, "codex", "hooks.json");
+process.env.SQWACK_HERMES_HOME = join(dir, "hermes");
 mkdirSync(join(dir, "claude"), { recursive: true });
 mkdirSync(join(dir, "codex"), { recursive: true });
+mkdirSync(join(dir, "hermes"), { recursive: true });
+writeFileSync(join(dir, "hermes", "config.yaml"), "model: test\n");
 
-const { installClaude, installCodex } = await import("../src/adapters/install.ts");
+const { installClaude, installCodex, installHermes } = await import("../src/adapters/install.ts");
 
 after(() => rmSync(dir, { recursive: true, force: true }));
 
@@ -82,4 +86,20 @@ test("codex installer prepends notify before TOML tables when none exists", () =
   const notifyIndex = config.indexOf("notify = ");
   const tableIndex = config.indexOf("[plugins");
   assert.ok(notifyIndex >= 0 && notifyIndex < tableIndex, "notify is a top-level key before any table");
+});
+
+test("Hermes installer adds an idempotent metadata-only gateway hook", () => {
+  installHermes();
+  const hook = join(dir, "hermes", "hooks", "sqwack", "handler.py");
+  const handler = readFileSync(hook, "utf8");
+  assert.ok(handler.includes('/v1/hooks/hermes'));
+  assert.ok(handler.includes('context.get("tool_names"'));
+  assert.ok(!handler.includes('context.get("message"'));
+  assert.ok(!handler.includes('context.get("response"'));
+  assert.ok(!handler.includes('context.get("tools"'));
+  execFileSync("python3", ["-m", "py_compile", hook]);
+  const before = handler;
+  const second = installHermes();
+  assert.equal(readFileSync(hook, "utf8"), before);
+  assert.ok(second.notes[0].includes("nothing changed"));
 });

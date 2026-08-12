@@ -120,6 +120,12 @@ final class SqwackStore {
         nodes.flatMap(\.usage).sorted { $0.provider < $1.provider }
     }
 
+    var hermesNodes: [NodeConnection] {
+        nodes.filter { !($0.hermes?.gateways.isEmpty ?? true) }
+    }
+
+    var hasHermes: Bool { !hermesNodes.isEmpty }
+
     /// Global status = worst status across machines (attention > failure > working > quiet).
     var globalStatus: SqwackStatus {
         nodes.map(\.status).max() ?? .quiet

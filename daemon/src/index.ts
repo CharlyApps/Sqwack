@@ -11,7 +11,7 @@ import { Engine } from "./core.ts";
 import { startServer } from "./api/server.ts";
 import { adminToken } from "./auth/auth.ts";
 import { runDemo } from "./demo.ts";
-import { installClaude, installCodex, integrationsStatus } from "./adapters/install.ts";
+import { installClaude, installCodex, installHermes, integrationsStatus } from "./adapters/install.ts";
 
 const [, , command = "help", ...args] = process.argv;
 
@@ -236,7 +236,7 @@ async function cmdStatus(): Promise<void> {
   pad("Local API", health ? `ready on http://${config.network.bind}:${config.network.port}` : "unreachable");
   const ts = tailscaleInfo();
   pad("Tailscale", ts.hostname ? `reachable (${ts.hostname})` : tailscaleBin() ? "installed, not connected" : "not installed");
-  for (const i of integrationsStatus().slice(0, 2)) {
+  for (const i of integrationsStatus()) {
     pad(`${i.integration}`, i.installed ? `${i.confidence} / active` : "not installed");
   }
   if (health) {
@@ -280,7 +280,7 @@ async function cmdDoctor(): Promise<void> {
   const dbPath = join(DATA_DIR, "sqwack.db");
   check("SQLite", existsSync(dbPath), dbPath);
   const integ = integrationsStatus();
-  for (const i of integ.slice(0, 2)) {
+  for (const i of integ) {
     check(`${i.integration} integration`, i.installed, i.installed ? `${i.confidence}` : `install with: sqwackd integrations install ${i.integration.split("-")[0]}`);
   }
   const ts = tailscaleInfo();
@@ -335,8 +335,8 @@ async function cmdDemo(): Promise<void> {
 
 async function cmdIntegrations(): Promise<void> {
   const [sub, name] = args;
-  if (sub === "install" && (name === "claude" || name === "codex")) {
-    const result = name === "claude" ? installClaude() : installCodex();
+  if (sub === "install" && (name === "claude" || name === "codex" || name === "hermes")) {
+    const result = name === "claude" ? installClaude() : name === "codex" ? installCodex() : installHermes();
     console.log(`Changed files:\n  ${result.changed.join("\n  ")}`);
     for (const note of result.notes) console.log(note);
     return;
@@ -347,7 +347,7 @@ async function cmdIntegrations(): Promise<void> {
     }
     return;
   }
-  console.error("usage: sqwackd integrations [status | install claude | install codex]");
+  console.error("usage: sqwackd integrations [status | install claude | install codex | install hermes]");
   process.exit(1);
 }
 
@@ -383,6 +383,7 @@ usage: sqwackd <command>
   integrations status         show integration health
   integrations install claude install Claude Code hooks
   integrations install codex  install Codex notify hook
+  integrations install hermes install Hermes gateway hooks
   devices [revoke <id>]       list or revoke paired devices
   doctor                      diagnose common problems
   logs [-f]                   show (or follow) daemon logs

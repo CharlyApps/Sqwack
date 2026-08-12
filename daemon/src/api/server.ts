@@ -5,6 +5,7 @@ import { Auth } from "../auth/auth.ts";
 import { validateEvent } from "../events/validate.ts";
 import { normalizeClaudeHook } from "../adapters/claude/adapter.ts";
 import { normalizeCodex } from "../adapters/codex/adapter.ts";
+import { normalizeHermesHook } from "../adapters/hermes/adapter.ts";
 import { integrationsStatus } from "../adapters/install.ts";
 import { killProcess } from "../processes/discovery.ts";
 import { readTranscript } from "../transcripts/transcripts.ts";
@@ -80,13 +81,14 @@ export function startServer(engine: Engine) {
         return json(res, accepted ? 202 : 200, { accepted, duplicate: !accepted });
       }
 
-      if (method === "POST" && (path === "/v1/hooks/claude" || path === "/v1/hooks/codex")) {
+      if (method === "POST" && ["/v1/hooks/claude", "/v1/hooks/codex", "/v1/hooks/hermes"].includes(path)) {
         if (caller.kind !== "admin") return json(res, 403, { error: "admin only" });
         const raw = (await readBody(req)) as Record<string, unknown>;
-        const event =
-          path === "/v1/hooks/claude"
-            ? normalizeClaudeHook(raw, engine.config.machineId)
-            : normalizeCodex(raw, engine.config.machineId);
+        const event = path === "/v1/hooks/claude"
+          ? normalizeClaudeHook(raw, engine.config.machineId)
+          : path === "/v1/hooks/codex"
+            ? normalizeCodex(raw, engine.config.machineId)
+            : normalizeHermesHook(raw, engine.config.machineId);
         if (!event) return json(res, 200, { accepted: false, reason: "unmapped hook" });
         engine.ingest(event);
         return json(res, 202, { accepted: true });

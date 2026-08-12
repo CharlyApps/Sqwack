@@ -10,6 +10,7 @@ Support levels are reported honestly via `GET /v1/integrations` and
 | Claude Code (CLI, desktop app, IDE) | full | `native` | official lifecycle hooks via `~/.claude/settings.json` |
 | Codex (CLI + desktop, interactive) | full | `native` with trusted hooks, else `derived` | lifecycle hooks (`~/.codex/hooks.json`) + `notify` fallback |
 | Codex `exec` (non-interactive) | full | `native` | `sqwack-codex-exec` wrapper over `codex exec --json` |
+| Hermes gateways + cron | local telemetry | `native` | profile-local lifecycle hook plus local runtime/cron files |
 | Claude Desktop (chat app) | unsupported | — | no supported native event mechanism |
 | Cloud agent runs | not in MVP | — | schema reserves `surface: "cloud"` |
 
@@ -77,6 +78,20 @@ survives being re-chained by other tools:
 Capability-tested notes (Codex 0.147, macOS): the desktop app shares
 `config.toml`/`hooks.json` with the CLI and reads them **only at startup** —
 restart the app after installing.
+
+## Hermes Agent — gateways and cron
+
+`sqwackd integrations install hermes` installs a small hook into every detected
+Hermes profile (`~/.hermes` and `~/.hermes/profiles/*`). Restart those gateways
+once so Hermes loads it. The hook reports only event type, profile, platform,
+session ID, safe tool names, model, and provider; message text, responses, user
+and chat IDs, tool arguments, and cron prompts never leave the Mac.
+
+Sqwack reads `gateway_state.json`, `gateway.pid`, and `cron/jobs.json` locally.
+A gateway is only shown as running when the PID is alive and the live process
+still identifies as Hermes/gateway, so a stale PID/state file fails closed.
+Cron jobs are grouped by profile/gateway. No Hermes model/provider usage API is
+called, and the Hermes tab is absent unless a connected machine has a profile.
 
 ## Usage / rate limits
 

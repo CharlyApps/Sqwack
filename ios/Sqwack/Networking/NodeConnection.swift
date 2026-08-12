@@ -21,6 +21,7 @@ final class NodeConnection {
     private(set) var system: SystemSnapshot?
     private(set) var topProcesses: [ProcessMetric] = []
     private(set) var activity: [ActivityItem] = []
+    private(set) var hermes: HermesSnapshot?
     private(set) var lastHeartbeat: Date?
     private(set) var lastError: String?
 
@@ -106,6 +107,7 @@ final class NodeConnection {
             system = snapshot.system
             topProcesses = snapshot.topProcesses ?? []
             activity = snapshot.activity ?? []
+            hermes = snapshot.hermes
             lastHeartbeat = .now
         case .sessionUpdated(let session):
             lastError = nil
@@ -119,6 +121,9 @@ final class NodeConnection {
         case .systemUpdated(let newSystem):
             lastError = nil
             system = newSystem
+        case .hermesUpdated(let newHermes):
+            lastError = nil
+            hermes = newHermes.gateways.isEmpty ? nil : newHermes
         case .statusUpdated(let newStatus):
             lastError = nil
             status = newStatus

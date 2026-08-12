@@ -58,10 +58,13 @@ struct RootView: View {
             }
             .background(Color.consoleBackground)
             .onAppear { store.connectAll() }
+            .onChange(of: store.hasHermes) { _, available in
+                if !available && selectedTab == "hermes" { selectedTab = "overview" }
+            }
             .onOpenURL { url in
-                // sqwack://tab/<overview|agents|development|settings>
+                // sqwack://tab/<overview|agents|development|hermes|settings>
                 if url.host() == "tab", let tab = url.pathComponents.dropFirst().first {
-                    selectedTab = tab
+                    if tab != "hermes" || store.hasHermes { selectedTab = tab }
                 }
             }
         } else {
@@ -73,6 +76,7 @@ struct RootView: View {
         switch selectedTab {
         case "agents": AgentsView()
         case "development": DevelopmentView()
+        case "hermes" where store.hasHermes: HermesView()
         case "settings": SettingsView()
         default: OverviewView()
         }
@@ -124,7 +128,11 @@ private struct DiagnosticBanner: View {
 private struct AppChrome: View {
     @Environment(SqwackStore.self) private var store
     @Binding var selectedTab: String
-    private let tabs = [("overview", "Overview"), ("agents", "Agents"), ("development", "Development"), ("settings", "Settings")]
+    private var tabs: [(String, String)] {
+        [("overview", "Overview"), ("agents", "Agents"), ("development", "Development")]
+            + (store.hasHermes ? [("hermes", "Hermes")] : [])
+            + [("settings", "Settings")]
+    }
 
     var body: some View {
         HStack {

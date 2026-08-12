@@ -4,6 +4,8 @@ import { join } from "node:path";
 import { DATA_DIR, loadConfig } from "../config.ts";
 import { claudeCapability } from "./claude/adapter.ts";
 import { codexCapability } from "./codex/adapter.ts";
+import { hermesCapability } from "./hermes/adapter.ts";
+import { hermesInstalled, hermesProfiles } from "./hermes/discovery.ts";
 import type { IntegrationCapability } from "../types.ts";
 
 const BIN_DIR = () => join(DATA_DIR, "bin");
@@ -180,6 +182,68 @@ export function installCodex(): { changed: string[]; notes: string[] } {
   };
 }
 
+export function installHermes(): { changed: string[]; notes: string[] } {
+  const profiles = hermesProfiles();
+  if (!profiles.length) return { changed: [], notes: ["Hermes was not found — nothing changed"] };
+  const { network } = loadConfig();
+  const changed: string[] = [];
+  for (const profile of profiles) {
+    const dir = join(profile.path, "hooks", "sqwack");
+    mkdirSync(dir, { recursive: true });
+    const manifestPath = join(dir, "HOOK.yaml");
+    const handlerPath = join(dir, "handler.py");
+    const manifest = `name: Sqwack\ndescription: Reports safe Hermes gateway lifecycle metadata to the local Sqwack daemon\nevents:\n  - agent:start\n  - agent:step\n  - agent:end\n`;
+    const handler = `# Installed by sqwackd. Never forwards messages, responses, user/chat IDs, or tool arguments.
+import json
+import threading
+import urllib.request
+
+PROFILE = ${JSON.stringify(profile.name)}
+URL = "http://127.0.0.1:${network.port}/v1/hooks/hermes"
+TOKEN_PATH = ${JSON.stringify(join(DATA_DIR, "admin-token"))}
+
+def _post(payload):
+    try:
+        with open(TOKEN_PATH, encoding="utf-8") as token_file:
+            token = token_file.read().strip()
+        request = urllib.request.Request(URL, data=json.dumps(payload).encode(), method="POST", headers={
+            "Authorization": "Bearer " + token,
+            "Content-Type": "application/json",
+        })
+        urllib.request.urlopen(request, timeout=2).close()
+    except Exception:
+        pass
+
+async def handle(event_type, context):
+    payload = {
+        "event_type": event_type,
+        "profile": PROFILE,
+        "platform": context.get("platform"),
+        "session_id": context.get("session_id"),
+    }
+    if event_type == "agent:step":
+        payload["iteration"] = context.get("iteration")
+        payload["tool_names"] = context.get("tool_names", [])[:20]
+    elif event_type == "agent:end":
+        payload["model"] = context.get("model")
+        payload["provider"] = context.get("provider")
+    threading.Thread(target=_post, args=(payload,), daemon=True).start()
+`;
+    for (const [path, content] of [[manifestPath, manifest], [handlerPath, handler]] as const) {
+      if (!existsSync(path) || readFileSync(path, "utf8") !== content) {
+        writeFileSync(path, content, { mode: 0o600 });
+        changed.push(path);
+      }
+    }
+  }
+  return {
+    changed,
+    notes: changed.length
+      ? [`Installed safe lifecycle hooks for: ${profiles.map((p) => p.name).join(", ")}`, "Restart each Hermes gateway to load the hook."]
+      : ["Hermes hooks already installed — nothing changed"],
+  };
+}
+
 /** Legacy notify channel — fallback that needs no hook trust. */
 function installCodexNotify(port: number): { changed: string[]; notes: string[] } {
   const script = writeHookScript(
@@ -263,6 +327,7 @@ export function integrationsStatus(): IntegrationCapability[] {
   return [
     claudeCapability(claudeInstalled),
     codexCapability(codexNotifyInstalled, codexHooksInstalled),
+    hermesCapability(hermesInstalled()),
     // The Claude *chat* desktop app has no supported event mechanism (see
     // docs/integrations.md). Claude Code and Codex hooks cover CLI, desktop
     // app, and IDE surfaces via their shared user-level configuration.

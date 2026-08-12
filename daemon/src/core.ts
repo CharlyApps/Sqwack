@@ -1,10 +1,11 @@
-import type { AgentSession, DevProcess, ServerMessage, Snapshot, SqwackEvent, SqwackStatus } from "./types.ts";
+import type { AgentSession, DevProcess, HermesSnapshot, ServerMessage, Snapshot, SqwackEvent, SqwackStatus } from "./types.ts";
 import type { Store } from "./persistence/db.ts";
 import type { Config } from "./config.ts";
 import { machineInfo } from "./config.ts";
 import { reduceEvent, sessionKey, computeStatus, attentionSessions, sweepStale, isProbeWorkspace } from "./sessions/reducer.ts";
 import { discoverProcesses } from "./processes/discovery.ts";
 import { discoverClaudeProcessSessions } from "./adapters/claude/processes.ts";
+import { discoverHermes } from "./adapters/hermes/discovery.ts";
 import { collectUsage, USAGE_PROVIDERS, type ProviderUsage, type UsageProvider } from "./usage/usage.ts";
 import { collectSystemStats, topProcesses, type ProcessMetric } from "./system/stats.ts";
 import type { ActivityItem, SystemSnapshot } from "./types.ts";
@@ -19,6 +20,7 @@ export class Engine {
   private system: SystemSnapshot | undefined;
   private processMetrics = new Map<number, ProcessMetric>();
   private top: ProcessMetric[] = [];
+  private hermes: HermesSnapshot | undefined;
   private serviceCpuHistory = new Map<number, number[]>();
   private usageRefreshes = new Map<string, Promise<void>>();
   private usageAttemptedAt = new Map<UsageProvider, number>();
@@ -93,6 +95,7 @@ export class Engine {
   async refreshProcesses(broadcast = true): Promise<DevProcess[]> {
     const discovered = await discoverProcesses(this.config.machineId, this.config.processFilters.excludeCommands);
     await this.refreshClaudeProcessSessions(broadcast);
+    this.refreshHermes(broadcast);
     // Enrich with per-process cpu/mem from the latest system sample.
     const livePids = new Set(discovered.map((p) => p.pid));
     for (const pid of this.serviceCpuHistory.keys()) if (!livePids.has(pid)) this.serviceCpuHistory.delete(pid);
@@ -111,6 +114,16 @@ export class Engine {
     this.processes = discovered;
     if (broadcast) this.broadcast({ type: "processes.updated", data: this.processes });
     return this.processes;
+  }
+
+  private refreshHermes(broadcast = true): void {
+    const fresh = discoverHermes();
+    if (JSON.stringify(fresh?.gateways) === JSON.stringify(this.hermes?.gateways)) return;
+    this.hermes = fresh;
+    if (broadcast) this.broadcast({
+      type: "hermes.updated",
+      data: fresh ?? { gateways: [], updatedAt: new Date().toISOString() },
+    });
   }
 
   private async refreshClaudeProcessSessions(broadcast = true): Promise<void> {
@@ -242,6 +255,7 @@ export class Engine {
       system: this.system,
       topProcesses: this.top,
       activity: this.recentActivity(),
+      hermes: this.hermes,
       connectedAt: new Date().toISOString(),
     };
   }
