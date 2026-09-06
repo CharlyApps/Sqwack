@@ -1,5 +1,6 @@
 package com.sqwack
 
+import android.content.Context
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -37,6 +38,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -46,6 +48,8 @@ import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
+
+private const val SHOWS_REMAINING_KEY = "sqwack.usageShowsRemaining"
 
 @Composable
 fun OverviewScreen(store: SqwackStore) {
@@ -209,7 +213,8 @@ private fun AccountUsageBand(
     now: Instant,
     compact: Boolean,
 ) {
-    var showsRemaining by remember { mutableStateOf(false) }
+    val prefs = LocalContext.current.applicationContext.getSharedPreferences("sqwack", Context.MODE_PRIVATE)
+    var showsRemaining by remember { mutableStateOf(prefs.getBoolean(SHOWS_REMAINING_KEY, false)) }
     var menuOpen by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
 
@@ -224,7 +229,7 @@ private fun AccountUsageBand(
     ) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             Text("ACCOUNT USAGE", fontSize = 17.sp, fontWeight = FontWeight.Black, color = Palette.primaryText)
-            Text("Manual refresh", fontSize = 13.sp, color = Palette.secondaryText)
+            Text(if (showsRemaining) "Remaining" else "Consumed", fontSize = 13.sp, color = Palette.secondaryText)
             Spacer(Modifier.weight(1f))
             Box {
                 Icon(
@@ -236,7 +241,10 @@ private fun AccountUsageBand(
                 DropdownMenu(menuOpen, onDismissRequest = { menuOpen = false }) {
                     DropdownMenuItem(
                         text = { Row(verticalAlignment = Alignment.CenterVertically) { Checkbox(showsRemaining, null); Text("Show Remaining") } },
-                        onClick = { showsRemaining = !showsRemaining },
+                        onClick = {
+                            showsRemaining = !showsRemaining
+                            prefs.edit().putBoolean(SHOWS_REMAINING_KEY, showsRemaining).apply()
+                        },
                     )
                     listOf("codex" to "Refresh Codex Usage", "claude" to "Refresh Claude Usage", "deepseek" to "Refresh DeepSeek Balance")
                         .forEach { (provider, label) ->

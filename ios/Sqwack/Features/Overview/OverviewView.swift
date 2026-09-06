@@ -216,7 +216,7 @@ private struct AccountUsageBand: View {
             HStack(spacing: 12) {
                 Text("ACCOUNT USAGE")
                     .font(.headline.weight(.heavy))
-                Text("Manual refresh")
+                Text(showsRemaining ? "Remaining" : "Consumed")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                 Spacer()
