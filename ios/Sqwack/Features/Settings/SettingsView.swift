@@ -27,6 +27,12 @@ struct SettingsView: View {
                         if let heartbeat = node.lastHeartbeat {
                             LabeledContent("Last heartbeat", value: heartbeat.agoLabel)
                         }
+                        if node.timesGate?.configured == true {
+                            Toggle("Times Gate dashboard", isOn: Binding(
+                                get: { node.timesGate?.enabled ?? false },
+                                set: { enabled in Task { await node.setTimesGate(enabled: enabled) } }
+                            ))
+                        }
                         ForEach(integrations[node.credentialRef] ?? []) { integration in
                             LabeledContent(integration.integration) {
                                 Text(integration.installed ? "\(integration.confidence) / active" : "not installed")
@@ -49,6 +55,7 @@ struct SettingsView: View {
             .task {
                 for node in store.nodes {
                     integrations[node.credentialRef] = await node.integrations()
+                    await node.refreshTimesGate()
                 }
             }
         }

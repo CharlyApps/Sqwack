@@ -3,10 +3,11 @@ import SwiftUI
 /// Detailed session list — the information-dense counterpart to Overview.
 struct AgentsView: View {
     @Environment(SqwackStore.self) private var store
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @State private var stateFilter: AgentState?
 
     private var filtered: [AgentSession] {
-        store.sessions().filter { stateFilter == nil || $0.state == stateFilter }
+        store.sessions(machineId: store.selectedMachineId).filter { stateFilter == nil || $0.state == stateFilter }
     }
 
     var body: some View {
@@ -49,13 +50,13 @@ struct AgentsView: View {
                                 .frame(maxWidth: .infinity, minHeight: 120)
                         }
 
-                        Text("Showing \(filtered.count) of \(store.sessions().count) agents")
+                        Text("Showing \(filtered.count) of \(store.sessions(machineId: store.selectedMachineId).count) agents")
                             .font(.subheadline)
                             .foregroundStyle(.tertiary)
                             .frame(maxWidth: .infinity)
                             .padding(.top, 8)
                     }
-                    .padding(24)
+                    .padding(horizontalSizeClass == .compact ? 16 : 24)
                 }
                 .background(Color.consoleBackground)
                 .toolbar(.hidden, for: .navigationBar)
@@ -66,12 +67,13 @@ struct AgentsView: View {
 
 private struct SessionRow: View {
     @Environment(SqwackStore.self) private var store
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     let session: AgentSession
     let now: Date
     @State private var showTranscript = false
 
     private var machineName: String {
-        store.nodes.first { $0.machine?.id == session.machineId }?.machine?.name ?? session.machineId
+        store.machineName(for: session.machineId)
     }
 
     private var timeDetail: String {
@@ -83,6 +85,50 @@ private struct SessionRow: View {
     }
 
     var body: some View {
+        if horizontalSizeClass == .compact {
+            compactRow
+        } else {
+            regularRow
+        }
+    }
+
+    private var compactRow: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 12) {
+                ProviderBadge(provider: session.provider, size: 44)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(session.provider.capitalized).font(.headline)
+                    Text(session.projectName ?? session.cwd ?? session.source)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+                Spacer()
+                Image(systemName: "chevron.right")
+                    .foregroundStyle(.tertiary)
+            }
+            HStack(spacing: 8) {
+                Circle().fill(session.state.color).frame(width: 8, height: 8)
+                Text(session.state.label)
+                    .font(.subheadline.weight(.heavy))
+                    .foregroundStyle(session.state.color)
+                Spacer()
+                Text(timeDetail).font(.caption).foregroundStyle(.secondary)
+            }
+            if let summary = session.summary {
+                Text(summary).font(.body).lineLimit(2)
+            }
+            HStack(spacing: 8) {
+                Chip(icon: "desktopcomputer", text: machineName)
+                Chip(icon: "terminal", text: session.source)
+                Spacer(minLength: 0)
+                acknowledgeButton
+            }
+        }
+        .sessionRowStyle(showTranscript: $showTranscript, session: session, store: store)
+    }
+
+    private var regularRow: some View {
         HStack(spacing: 16) {
             ProviderBadge(provider: session.provider, size: 52)
             VStack(alignment: .leading, spacing: 3) {
@@ -117,36 +163,44 @@ private struct SessionRow: View {
             Spacer()
             Sparkline(values: (session.activity ?? []).map(Double.init), color: session.state.color)
                 .frame(width: 180, height: 34)
-            if session.state == .needsInput || session.state == .failed {
-                Button {
-                    Task {
-                        for node in store.nodes where node.machine?.id == session.machineId {
-                            await node.acknowledge(session: session.id)
-                        }
-                    }
-                } label: {
-                    Image(systemName: "checkmark.circle")
-                        .font(.title3)
-                }
-                .buttonStyle(.borderless)
-                .help("Acknowledge")
-            }
+            acknowledgeButton
             Image(systemName: "chevron.right")
                 .font(.callout.weight(.semibold))
                 .foregroundStyle(.tertiary)
         }
-        .padding(18)
-        .background(
-            RoundedRectangle(cornerRadius: 16)
-                .fill(Color.consolePanel)
-                .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(Color.consoleStroke))
-        )
-        .contentShape(RoundedRectangle(cornerRadius: 18))
-        .onTapGesture { showTranscript = true }
-        .sheet(isPresented: $showTranscript) {
-            TranscriptView(session: session)
-                .environment(store)
+        .sessionRowStyle(showTranscript: $showTranscript, session: session, store: store)
+    }
+
+    @ViewBuilder private var acknowledgeButton: some View {
+        if session.state == .needsInput || session.state == .failed {
+            Button {
+                Task {
+                    for node in store.nodes where node.machine?.id == session.machineId {
+                        await node.acknowledge(session: session.id)
+                    }
+                }
+            } label: {
+                Image(systemName: "checkmark.circle").font(.title3)
+            }
+            .buttonStyle(.borderless)
+            .help("Acknowledge")
         }
+    }
+}
+
+private extension View {
+    func sessionRowStyle(showTranscript: Binding<Bool>, session: AgentSession, store: SqwackStore) -> some View {
+        padding(18)
+            .background(
+                RoundedRectangle(cornerRadius: 16)
+                    .fill(Color.consolePanel)
+                    .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(Color.consoleStroke))
+            )
+            .contentShape(RoundedRectangle(cornerRadius: 18))
+            .onTapGesture { showTranscript.wrappedValue = true }
+            .sheet(isPresented: showTranscript) {
+                TranscriptView(session: session).environment(store)
+            }
     }
 }
 

@@ -2,12 +2,10 @@ import SwiftUI
 
 struct HermesView: View {
     @Environment(SqwackStore.self) private var store
-    @State private var selectedMachine = "all"
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
     private var nodes: [NodeConnection] {
-        let available = store.hermesNodes
-        guard selectedMachine != "all", available.contains(where: { $0.machine?.id == selectedMachine }) else { return available }
-        return available.filter { $0.machine?.id == selectedMachine }
+        store.hermesNodes
     }
 
     var body: some View {
@@ -22,7 +20,6 @@ struct HermesView: View {
                             .foregroundStyle(.secondary)
                     }
                     Spacer()
-                    if store.hermesNodes.count > 1 { machinePicker }
                 }
 
                 ForEach(nodes, id: \.credentialRef) { node in
@@ -36,36 +33,21 @@ struct HermesView: View {
                     }
                 }
             }
-            .padding(.horizontal, 28)
+            .padding(.horizontal, horizontalSizeClass == .compact ? 16 : 28)
             .padding(.vertical, 18)
         }
-        .refreshable { await store.refreshAll() }
-    }
-
-    private var machinePicker: some View {
-        Picker("Machine", selection: $selectedMachine) {
-            Text("All Macs").tag("all")
-            ForEach(store.hermesNodes, id: \.credentialRef) { node in
-                if let id = node.machine?.id {
-                    Text(node.machine?.name ?? "Mac").tag(id)
-                }
-            }
-        }
-        .pickerStyle(.menu)
-        .padding(.horizontal, 12)
-        .padding(.vertical, 7)
-        .background(Capsule().fill(Color.consolePanelRaised))
-        .overlay(Capsule().strokeBorder(Color.consoleStroke))
+        .refreshable { await store.refreshAll(machineId: store.selectedMachineId) }
     }
 }
 
 private struct HermesGatewayPanel: View {
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     let gateway: HermesGateway
 
     var body: some View {
         Panel(title: gateway.profile, badge: gateway.running ? "Running" : "Stopped", trailing: "\(gateway.cronJobs.count) cron jobs") {
             VStack(alignment: .leading, spacing: 16) {
-                HStack(spacing: 18) {
+                (horizontalSizeClass == .compact ? AnyLayout(VStackLayout(alignment: .leading, spacing: 10)) : AnyLayout(HStackLayout(spacing: 18))) {
                     Label("\(gateway.activeAgents) active", systemImage: "bolt.fill")
                         .foregroundStyle(gateway.activeAgents > 0 ? .mint : .secondary)
                     Text(gateway.state.replacingOccurrences(of: "_", with: " ").capitalized)
@@ -107,6 +89,7 @@ private struct HermesGatewayPanel: View {
 }
 
 private struct HermesCronRow: View {
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     let job: HermesCronJob
 
     private var status: String {
@@ -126,7 +109,7 @@ private struct HermesCronRow: View {
     }
 
     var body: some View {
-        HStack(spacing: 14) {
+        (horizontalSizeClass == .compact ? AnyLayout(VStackLayout(alignment: .leading, spacing: 10)) : AnyLayout(HStackLayout(spacing: 14))) {
             Circle().fill(statusColor).frame(width: 9, height: 9)
             VStack(alignment: .leading, spacing: 4) {
                 Text(job.name).font(.headline)

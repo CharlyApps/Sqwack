@@ -2,37 +2,45 @@ import SwiftUI
 
 struct OverviewView: View {
     @Environment(SqwackStore.self) private var store
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+
+    private var visibleNodes: [NodeConnection] {
+        store.nodes.filter { $0.machine != nil && (store.selectedMachineId == nil || $0.machine?.id == store.selectedMachineId) }
+    }
 
     var body: some View {
         TimelineView(.periodic(from: .now, by: 1)) { timeline in
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
-                    DashboardTopStrip(now: timeline.date)
-                    HStack(alignment: .top, spacing: 20) {
-                        ServicesPanel()
-                        SystemPanel()
-                        ActivityPanel(now: timeline.date)
+                    DashboardTopStrip(machineId: store.selectedMachineId, now: timeline.date)
+                    (horizontalSizeClass == .compact ? AnyLayout(VStackLayout(spacing: 14)) : AnyLayout(HStackLayout(alignment: .top, spacing: 20))) {
+                        ServicesPanel(machineId: store.selectedMachineId)
+                        SystemPanel(nodes: visibleNodes)
+                        ActivityPanel(items: store.activity(machineId: store.selectedMachineId), now: timeline.date)
                     }
-                    AccountUsageBand(now: timeline.date)
+                    AccountUsageBand(machineId: store.selectedMachineId, usages: store.usage(machineId: store.selectedMachineId), now: timeline.date)
                 }
-                .padding(.horizontal, 26)
+                .padding(.horizontal, horizontalSizeClass == .compact ? 16 : 26)
                 .padding(.top, 12)
                 .padding(.bottom, 12)
             }
         }
         .background(Color.consoleBackground)
     }
+
 }
 
 private struct DashboardTopStrip: View {
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    let machineId: String?
     let now: Date
 
     var body: some View {
-        HStack(alignment: .top, spacing: 16) {
-            StatusHeader(now: now)
-                .frame(minWidth: 240, idealWidth: 280, maxWidth: 300, alignment: .leading)
+        (horizontalSizeClass == .compact ? AnyLayout(VStackLayout(alignment: .leading, spacing: 12)) : AnyLayout(HStackLayout(alignment: .top, spacing: 16))) {
+            StatusHeader(machineId: machineId, now: now)
+                .frame(minWidth: horizontalSizeClass == .compact ? 0 : 240, idealWidth: 280, maxWidth: horizontalSizeClass == .compact ? .infinity : 300, alignment: .leading)
                 .layoutPriority(1)
-            AgentCardsRow(now: now)
+            AgentCardsRow(machineId: machineId, now: now)
                 .frame(maxWidth: .infinity)
         }
     }
@@ -40,11 +48,12 @@ private struct DashboardTopStrip: View {
 
 private struct StatusHeader: View {
     @Environment(SqwackStore.self) private var store
+    let machineId: String?
     let now: Date
 
     private var subline: String {
-        let working = store.sessions().filter { $0.state == .working }.count
-        let services = store.processes().count
+        let working = store.sessions(machineId: machineId).filter { $0.state == .working }.count
+        let services = store.processes(machineId: machineId).count
         var parts: [String] = []
         if working > 0 { parts.append("\(working) agent\(working == 1 ? "" : "s") working") }
         if services > 0 { parts.append("\(services) service\(services == 1 ? "" : "s")") }
@@ -52,7 +61,7 @@ private struct StatusHeader: View {
     }
 
     private var needLine: String {
-        switch store.globalStatus {
+        switch store.status(machineId: machineId) {
         case .attention: "Agents are waiting for you"
         case .failure: "Something failed"
         default: "Nothing needs you right now."
@@ -60,7 +69,7 @@ private struct StatusHeader: View {
     }
 
     var body: some View {
-        let status = store.globalStatus
+        let status = store.status(machineId: machineId)
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 12) {
                 Circle()
@@ -99,10 +108,12 @@ struct AnyModifier: ViewModifier {
 
 private struct AgentCardsRow: View {
     @Environment(SqwackStore.self) private var store
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    let machineId: String?
     let now: Date
 
     var body: some View {
-        let sessions = store.boardSessions
+        let sessions = store.boardSessions(machineId: machineId)
         if sessions.isEmpty {
             Text("No recent agent activity")
                 .font(.body)
@@ -114,11 +125,25 @@ private struct AgentCardsRow: View {
                         .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(Color.consoleStroke))
                 )
         } else {
-            HStack(spacing: 12) {
-                ForEach(sessions.prefix(4)) { session in
-                    AgentCard(session: session, now: now)
+            if horizontalSizeClass == .compact {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    cards(sessions)
                 }
-                Spacer(minLength: 0)
+            } else {
+                HStack(spacing: 12) {
+                    ForEach(sessions.prefix(4)) { session in
+                        AgentCard(session: session, now: now)
+                    }
+                    Spacer(minLength: 0)
+                }
+            }
+        }
+    }
+
+    private func cards(_ sessions: [AgentSession]) -> some View {
+        HStack(spacing: 12) {
+            ForEach(sessions.prefix(4)) { session in
+                AgentCard(session: session, now: now)
             }
         }
     }
@@ -180,6 +205,10 @@ struct AgentCard: View {
 
 private struct AccountUsageBand: View {
     @Environment(SqwackStore.self) private var store
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @AppStorage("sqwack.usageShowsRemaining") private var showsRemaining = false
+    let machineId: String?
+    let usages: [ProviderUsage]
     let now: Date
 
     var body: some View {
@@ -192,20 +221,16 @@ private struct AccountUsageBand: View {
                     .foregroundStyle(.secondary)
                 Spacer()
                 Menu {
-                    Button("Refresh Account Usage", systemImage: "chart.bar") {
-                        Task { await store.refreshUsage() }
-                    }
+                    Toggle("Show Remaining", isOn: $showsRemaining)
+                    Divider()
                     Button("Refresh Codex Usage", systemImage: "cube.fill") {
-                        Task { await store.refreshUsage(provider: "codex") }
+                        Task { await store.refreshUsage(provider: "codex", machineId: machineId) }
                     }
                     Button("Refresh Claude Usage", systemImage: "sparkles") {
-                        Task { await store.refreshUsage(provider: "claude") }
+                        Task { await store.refreshUsage(provider: "claude", machineId: machineId) }
                     }
                     Button("Refresh DeepSeek Balance", systemImage: "creditcard") {
-                        Task { await store.refreshUsage(provider: "deepseek") }
-                    }
-                    Button("Refresh Dashboard", systemImage: "arrow.clockwise") {
-                        Task { await store.refreshAll() }
+                        Task { await store.refreshUsage(provider: "deepseek", machineId: machineId) }
                     }
                 } label: {
                     Image(systemName: "arrow.clockwise.circle")
@@ -215,7 +240,7 @@ private struct AccountUsageBand: View {
                 .buttonStyle(.plain)
                 .help("Refresh account usage")
             }
-            if store.usage.isEmpty {
+            if usages.isEmpty {
                 HStack {
                     Text("Refresh usage when you need it.")
                         .foregroundStyle(.tertiary)
@@ -223,15 +248,15 @@ private struct AccountUsageBand: View {
                 }
                 .frame(minHeight: 86)
             } else {
-                HStack(alignment: .top, spacing: 0) {
-                    ForEach(Array(store.usage.enumerated()), id: \.element.id) { index, usage in
-                        UsageColumn(usage: usage, now: now)
+                (horizontalSizeClass == .compact ? AnyLayout(VStackLayout(alignment: .leading, spacing: 16)) : AnyLayout(HStackLayout(alignment: .top, spacing: 0))) {
+                    ForEach(Array(usages.enumerated()), id: \.element.id) { index, usage in
+                        UsageColumn(usage: usage, showsRemaining: showsRemaining, now: now)
                             .frame(maxWidth: .infinity)
-                        if index < store.usage.count - 1 {
+                        if index < usages.count - 1 {
                             Rectangle()
                                 .fill(Color.consoleStroke)
-                                .frame(width: 1)
-                                .padding(.horizontal, 24)
+                                .frame(width: horizontalSizeClass == .compact ? nil : 1, height: horizontalSizeClass == .compact ? 1 : nil)
+                                .padding(.horizontal, horizontalSizeClass == .compact ? 0 : 24)
                         }
                     }
                 }
@@ -249,6 +274,7 @@ private struct AccountUsageBand: View {
 
 private struct UsageColumn: View {
     let usage: ProviderUsage
+    let showsRemaining: Bool
     let now: Date
 
     /// The window that should dominate the card: the shortest (most urgent).
@@ -288,12 +314,16 @@ private struct UsageColumn: View {
         if isBalanceStyle, let detail = primary.detail {
             return detail.split(separator: "(").first.map { String($0).trimmingCharacters(in: .whitespaces) } ?? detail
         }
-        return "\(Int(primary.usedPercent))%"
+        return "\(Int(percent(primary)))%"
     }
 
     private var detailText: String {
         if isBalanceStyle { return primary?.detail ?? usage.source }
-        return usage.windows.map { "\($0.label) \(Int($0.usedPercent))%" }.joined(separator: " / ")
+        return usage.windows.map { "\($0.label) \(Int(percent($0)))%" }.joined(separator: " / ")
+    }
+
+    private func percent(_ window: UsageWindow) -> Double {
+        showsRemaining ? max(0, 100 - window.usedPercent) : window.usedPercent
     }
 
     private func resetText(_ window: UsageWindow) -> String {
@@ -333,7 +363,7 @@ private struct UsageColumn: View {
                         .minimumScaleFactor(0.7)
                 }
                 if !isBalanceStyle {
-                    MeterBar(fraction: primary.usedPercent / 100, color: barColor)
+                    MeterBar(fraction: percent(primary) / 100, color: barColor)
                         .frame(height: 5)
                     HStack(spacing: 7) {
                         Image(systemName: "clock")
@@ -482,16 +512,21 @@ struct UsageMeter: View {
 
 private struct ServicesPanel: View {
     @Environment(SqwackStore.self) private var store
+    let machineId: String?
 
     var body: some View {
-        let processes = store.processes()
+        let processes = store.processes(machineId: machineId)
         Panel(title: "SERVICES", badge: "\(processes.count)") {
             if processes.isEmpty {
                 Text("None running").foregroundStyle(.tertiary)
             }
             ForEach(processes.prefix(4)) { process in
                 HStack(spacing: 12) {
-                    Circle().fill(.green).frame(width: 9, height: 9)
+                    if process.containerRuntime == "docker" {
+                        Text("🐳").font(.caption).accessibilityLabel("Container")
+                    } else {
+                        Circle().fill(.green).frame(width: 9, height: 9)
+                    }
                     Text(verbatim: process.port.map { ":\($0)" } ?? "—")
                         .font(.system(.body, design: .monospaced))
                         .foregroundStyle(.secondary)
@@ -500,6 +535,12 @@ private struct ServicesPanel: View {
                         .font(.body.weight(.medium))
                         .lineLimit(1)
                     Spacer()
+                    if machineId == nil, store.nodes.count > 1 {
+                        Text(store.machineName(for: process.machineId))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
                     Text(process.category ?? "")
                         .font(.caption)
                         .foregroundStyle(.tertiary)
@@ -511,29 +552,38 @@ private struct ServicesPanel: View {
 }
 
 private struct SystemPanel: View {
-    @Environment(SqwackStore.self) private var store
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    let nodes: [NodeConnection]
 
     var body: some View {
         Panel(title: "SYSTEM") {
-            if let system = store.system {
-                HStack(spacing: 12) {
-                    StatTile(label: "CPU", value: "\(Int(system.stats.cpuPercent))", suffix: "%",
-                             fraction: system.stats.cpuPercent / 100, color: .blue, history: system.history.cpu)
-                    StatTile(label: "RAM", value: Format.bytes(system.stats.ramUsedBytes).replacingOccurrences(of: " GB", with: ""), suffix: " GB",
-                             detail: "of \(Format.bytes(system.stats.ramTotalBytes))",
-                             fraction: Double(system.stats.ramUsedBytes) / Double(system.stats.ramTotalBytes), color: .purple, history: system.history.ram)
-                    StatTile(label: "UPTIME", value: Format.uptime(system.stats.uptimeSeconds), suffix: "",
-                             color: .purple, history: system.history.network)
+            ForEach(nodes, id: \.credentialRef) { node in
+                if let system = node.system {
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack(spacing: 8) {
+                            Image(systemName: "desktopcomputer")
+                            Text(node.machine?.name ?? "Mac").fontWeight(.semibold)
+                            Spacer()
+                            if let machine = node.machine {
+                                Text("\(machine.platform)/\(machine.architecture)").monospaced()
+                            }
+                        }
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        (horizontalSizeClass == .compact ? AnyLayout(VStackLayout(spacing: 8)) : AnyLayout(HStackLayout(spacing: 12))) {
+                            StatTile(label: "CPU", value: "\(Int(system.stats.cpuPercent))", suffix: "%",
+                                     fraction: system.stats.cpuPercent / 100, color: .blue, history: system.history.cpu)
+                            StatTile(label: "RAM", value: Format.bytes(system.stats.ramUsedBytes).replacingOccurrences(of: " GB", with: ""), suffix: " GB",
+                                     detail: "of \(Format.bytes(system.stats.ramTotalBytes))",
+                                     fraction: Double(system.stats.ramUsedBytes) / Double(system.stats.ramTotalBytes), color: .purple, history: system.history.ram)
+                            StatTile(label: "UPTIME", value: Format.uptime(system.stats.uptimeSeconds), suffix: "",
+                                     color: .purple, history: system.history.network)
+                        }
+                    }
+                    if node.credentialRef != nodes.last?.credentialRef { Divider() }
                 }
-                HStack(spacing: 8) {
-                    Image(systemName: "desktopcomputer").font(.caption)
-                    Text(store.machineName).font(.caption)
-                    Spacer()
-                    Text(store.machineInfo).font(.caption)
-                }
-                .foregroundStyle(.tertiary)
-                .padding(.top, 4)
-            } else {
+            }
+            if nodes.allSatisfy({ $0.system == nil }) {
                 Text("Waiting for system stats…").foregroundStyle(.tertiary)
             }
         }
@@ -574,7 +624,7 @@ private struct StatTile: View {
 }
 
 private struct ActivityPanel: View {
-    @Environment(SqwackStore.self) private var store
+    let items: [ActivityItem]
     let now: Date
 
     private func dotColor(_ severity: String) -> Color {
@@ -588,10 +638,10 @@ private struct ActivityPanel: View {
 
     var body: some View {
         Panel(title: "ACTIVITY") {
-            if store.activity.isEmpty {
+            if items.isEmpty {
                 Text("No recent activity").foregroundStyle(.tertiary)
             }
-            ForEach(store.activity.prefix(4)) { item in
+            ForEach(items.prefix(4)) { item in
                 HStack(spacing: 10) {
                     Circle().fill(dotColor(item.severity)).frame(width: 8, height: 8)
                     Text(item.message)
@@ -602,7 +652,7 @@ private struct ActivityPanel: View {
                         .font(.caption)
                         .foregroundStyle(.tertiary)
                 }
-                if item.id != store.activity.prefix(4).last?.id { Divider() }
+                if item.id != items.prefix(4).last?.id { Divider() }
             }
         }
     }

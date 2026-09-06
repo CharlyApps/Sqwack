@@ -127,6 +127,40 @@ sqwackd doctor
 
 Sqwack uses Tailscale Serve only. It does not use Tailscale Funnel.
 
+## Times Gate
+
+Sqwack can mirror Codex and Claude usage, agent state, CPU/RAM, and disk/uptime
+activity across all five screens of a Divoom Times Gate.
+
+Add the device IP and the `LocalToken` shown in the Divoom app's device settings
+to `~/.sqwack/config.json`:
+
+```json
+{
+  "timesGate": {
+    "host": "192.168.1.123",
+    "localToken": 123456,
+    "mac": "98:a3:16:d8:f2:74"
+  }
+}
+```
+
+Then run `sqwackd restart`. The token stays in the existing mode-0600 local
+config file and is never sent anywhere except the Times Gate on the LAN.
+
+Release the screens to the Divoom app or device Mode control, then restore the
+live dashboard later:
+
+```bash
+sqwackd timesgate off
+sqwackd timesgate on
+sqwackd timesgate toggle
+sqwackd timesgate find
+```
+
+The selected state persists across daemon and Mac restarts. If DHCP changes the
+device address, `find` locates the saved MAC, updates the IP, and restores the dashboard.
+
 ## Try Demo Data
 
 ```bash

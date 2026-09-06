@@ -30,10 +30,16 @@ const config: ConfigT = {
 let api: ReturnType<typeof startServer>;
 let admin: string;
 const engine = new Engine(openMemoryStore(), config);
+let timesGateEnabled = true;
+const timesGate = {
+  configured: true,
+  get enabled() { return timesGateEnabled; },
+  async setEnabled(enabled: boolean) { timesGateEnabled = enabled; },
+};
 
 before(async () => {
   admin = adminToken();
-  api = startServer(engine);
+  api = startServer(engine, timesGate);
   await new Promise((r) => api.server.once("listening", r));
 });
 
@@ -217,6 +223,21 @@ test("usage refresh validates provider", async () => {
     method: "POST", headers: authed(admin), body: JSON.stringify({ provider: "nope" }),
   });
   assert.equal(res.status, 400);
+});
+
+test("Times Gate output can be toggled", async () => {
+  const initial = await fetch(`${BASE}/v1/timesgate`, { headers: authed(admin) });
+  assert.deepEqual(await initial.json(), { configured: true, enabled: true });
+
+  const toggled = await fetch(`${BASE}/v1/timesgate`, {
+    method: "POST", headers: authed(admin), body: JSON.stringify({ enabled: false }),
+  });
+  assert.deepEqual(await toggled.json(), { configured: true, enabled: false });
+
+  const invalid = await fetch(`${BASE}/v1/timesgate`, {
+    method: "POST", headers: authed(admin), body: JSON.stringify({ enabled: "no" }),
+  });
+  assert.equal(invalid.status, 400);
 });
 
 test("session ack clears attention", async () => {

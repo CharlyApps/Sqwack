@@ -12,6 +12,7 @@ export interface Config {
   machineId: string;
   machineName: string;
   network: { port: number; bind: string; tailscaleServe: boolean };
+  timesGate?: { host: string; localToken: number; enabled?: boolean; mac?: string };
   logLevel: "error" | "warn" | "info" | "debug";
   logEventBodies: boolean; // default false: don't log prompt/summary bodies
   retentionDays: { events: number; sessions: number };

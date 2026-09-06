@@ -1,6 +1,7 @@
 import { execFile } from "node:child_process";
+import { existsSync } from "node:fs";
+import { basename, delimiter, join } from "node:path";
 import { promisify } from "node:util";
-import { basename } from "node:path";
 import type { DevProcess } from "../types.ts";
 
 const exec = promisify(execFile);
@@ -83,6 +84,49 @@ export function processId(pid: number, started: Date | undefined): string {
   return `${pid}-${(started ? Math.floor(started.getTime() / 1000) : 0).toString(36)}`;
 }
 
+export function parseDockerContainer(line: string, machineId: string): DevProcess | undefined {
+  try {
+    const row = JSON.parse(line) as Record<string, unknown>;
+    if (typeof row.ID !== "string" || typeof row.Names !== "string") return undefined;
+    const port = typeof row.Ports === "string"
+      ? row.Ports.split(",").map((value) => value.match(/:(\d+)->\d+\/tcp/)?.[1]).find(Boolean)
+      : undefined;
+    return {
+      id: `docker:${row.ID}`,
+      machineId,
+      pid: 0,
+      name: row.Names,
+      command: typeof row.Image === "string" ? row.Image : undefined,
+      port: port ? Number(port) : undefined,
+      protocol: "tcp",
+      category: "container",
+      containerRuntime: "docker",
+      killable: false,
+    };
+  } catch {
+    return undefined;
+  }
+}
+
+async function discoverContainers(machineId: string): Promise<DevProcess[]> {
+  const candidates = [
+    process.env.DOCKER_CLI_PATH,
+    "/opt/homebrew/bin/docker",
+    "/usr/local/bin/docker",
+    "/Applications/Docker.app/Contents/Resources/bin/docker",
+    ...(process.env.PATH ?? "").split(delimiter).map((dir) => join(dir, "docker")),
+  ];
+  const docker = candidates.find((candidate): candidate is string => !!candidate && existsSync(candidate));
+  if (!docker) return [];
+  try {
+    // The CLI honors Docker contexts and DOCKER_HOST, including Colima's socket.
+    const { stdout } = await exec(docker, ["ps", "--format", "{{json .}}"], { timeout: 3_000 });
+    return stdout.split("\n").map((line) => parseDockerContainer(line, machineId)).filter((item): item is DevProcess => !!item);
+  } catch {
+    return []; // Docker/Colima is optional or stopped.
+  }
+}
+
 export async function discoverProcesses(machineId: string, excludeCommands: string[] = []): Promise<DevProcess[]> {
   const listeners = await listListeners();
   const byPid = new Map<number, RawListener[]>();
@@ -115,6 +159,7 @@ export async function discoverProcesses(machineId: string, excludeCommands: stri
       killable: pid !== process.pid && command !== "sqwackd",
     });
   }
+  result.push(...await discoverContainers(machineId));
   return result.sort((a, b) => (a.port ?? 0) - (b.port ?? 0));
 }
 

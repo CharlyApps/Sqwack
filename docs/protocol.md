@@ -72,7 +72,8 @@ interface DevProcess {
   machineId: string;
   pid: number; name: string; command?: string; cwd?: string;
   port?: number; protocol?: string; startedAt?: string;
-  category?: "node" | "java" | "python" | "database" | "other";
+  category?: "node" | "java" | "python" | "database" | "container" | "other";
+  containerRuntime?: "docker"; // Docker-compatible CLI/context, including Colima
   killable: boolean;
 }
 ```
@@ -120,6 +121,8 @@ metadata (name, schedule, next/last run, status, error category, delivery).
 | `GET /v1/sessions/:id/transcript` | yes | conversation read live from the provider's own files (never persisted by Sqwack) |
 | `GET /v1/processes` | yes | fresh discovery of listening dev processes |
 | `POST /v1/usage/refresh` | yes | refresh provider usage on demand; optional body `{ provider: "codex" \| "claude" \| "deepseek" }` → `{ usage }` |
+| `GET /v1/timesgate` | yes | Times Gate configuration and output state → `{ configured, enabled }` |
+| `POST /v1/timesgate` | yes | enable or disable Times Gate output; body `{ enabled: boolean }` |
 | `POST /v1/processes/:id/kill` | yes (rate-limited) | verify identity → SIGTERM → `{ outcome: "exited" \| "terminating" }`; `404` unknown id, `409` refused |
 | `GET /v1/integrations` | yes | `IntegrationCapability[]` |
 | `GET /v1/devices` | yes | paired devices |

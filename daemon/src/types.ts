@@ -97,7 +97,8 @@ export interface DevProcess {
   port?: number;
   protocol?: string;
   startedAt?: string;
-  category?: "node" | "java" | "python" | "database" | "other";
+  category?: "node" | "java" | "python" | "database" | "container" | "other";
+  containerRuntime?: "docker";
   killable: boolean;
   cpuPercent?: number;
   memoryBytes?: number;

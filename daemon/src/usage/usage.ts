@@ -91,7 +91,7 @@ export async function collectCodexBarUsage(provider: UsageProvider = "codex", bi
   if (!bin || process.env.SQWACK_CODEXBAR_DISABLE === "1") return undefined;
   let raw = "";
   try {
-    const source = provider === "deepseek" ? "auto" : "cli";
+    const source = provider === "codex" || provider === "deepseek" ? "auto" : "cli";
     const result = await execFileAsync(bin, ["usage", "--provider", provider, "--source", source, "--format", "json"], {
       encoding: "utf8",
       timeout: 30_000,

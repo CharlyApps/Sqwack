@@ -5,6 +5,11 @@ enum ConnectionState: String {
     case connecting, connected, disconnected, error
 }
 
+struct TimesGateState: Codable, Equatable {
+    var configured: Bool
+    var enabled: Bool
+}
+
 /// One daemon (= one machine). SqwackStore can hold several of these; the MVP
 /// UI pairs with exactly one, but nothing in this layer assumes that.
 @Observable
@@ -22,6 +27,7 @@ final class NodeConnection {
     private(set) var topProcesses: [ProcessMetric] = []
     private(set) var activity: [ActivityItem] = []
     private(set) var hermes: HermesSnapshot?
+    private(set) var timesGate: TimesGateState?
     private(set) var lastHeartbeat: Date?
     private(set) var lastError: String?
 
@@ -267,6 +273,30 @@ final class NodeConnection {
         } catch {
             await reportError("GET /v1/integrations", error)
             return []
+        }
+    }
+
+    @MainActor
+    func refreshTimesGate() async {
+        do {
+            let data = try await request("/v1/timesgate")
+            timesGate = try JSONDecoder.sqwack.decode(TimesGateState.self, from: data)
+        } catch {
+            reportError("GET /v1/timesgate", error)
+        }
+    }
+
+    @MainActor
+    func setTimesGate(enabled: Bool) async {
+        let previous = timesGate
+        timesGate = TimesGateState(configured: true, enabled: enabled)
+        do {
+            let body = try JSONEncoder().encode(["enabled": enabled])
+            let data = try await request("/v1/timesgate", method: "POST", body: body)
+            timesGate = try JSONDecoder.sqwack.decode(TimesGateState.self, from: data)
+        } catch {
+            timesGate = previous
+            reportError("POST /v1/timesgate", error)
         }
     }
 

@@ -100,6 +100,17 @@ JSON
   });
 });
 
+test("uses CodexBar auto source for Codex when its CLI source is broken", async () => {
+  const bin = join(root, "codexbar-source-fake");
+  writeFileSync(bin, `#!/bin/sh
+printf '[{"provider":"%s","source":"%s","usage":{"secondary":{"usedPercent":17,"windowMinutes":10080}}}]\n' "$3" "$5"
+`);
+  chmodSync(bin, 0o755);
+  const usage = (await collectCodexBarUsage("codex", bin))!;
+  assert.equal(usage.source, "auto");
+  assert.equal(usage.windows[0].usedPercent, 17);
+});
+
 test("default usage refresh does not call Claude network endpoint", async () => {
   const originalFetch = globalThis.fetch;
   process.env.SQWACK_CODEXBAR_DISABLE = "1";

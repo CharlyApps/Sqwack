@@ -3,9 +3,16 @@ import SwiftUI
 /// Services, processes and system health — the full monitor screen.
 struct DevelopmentView: View {
     @Environment(SqwackStore.self) private var store
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @State private var confirmKill: DevProcess?
     @State private var killError: String?
     @State private var killing = false
+
+    private var visibleNodes: [NodeConnection] {
+        store.nodes.filter { node in
+            node.machine != nil && (store.selectedMachineId == nil || node.machine?.id == store.selectedMachineId)
+        }
+    }
 
     var body: some View {
         TimelineView(.periodic(from: .now, by: 1)) { timeline in
@@ -19,22 +26,22 @@ struct DevelopmentView: View {
                                 .foregroundStyle(.secondary)
                         }
 
-                        ServicesTable(now: timeline.date, onKill: { confirmKill = $0 })
+                        ServicesTable(machineId: store.selectedMachineId, now: timeline.date, onKill: { confirmKill = $0 })
 
-                        HStack(alignment: .top, spacing: 20) {
-                            ResourcePanel()
-                            RecentOutputPanel()
-                            SystemHealthPanel()
+                        ForEach(visibleNodes, id: \.credentialRef) { node in
+                            MachineSystemSection(node: node)
                         }
 
-                        TopProcessesPanel()
+                        RecentOutputPanel(items: store.selectedMachineId.flatMap { id in
+                            store.nodes.first { $0.machine?.id == id }?.activity
+                        } ?? store.activity)
                     }
-                    .padding(24)
+                    .padding(horizontalSizeClass == .compact ? 16 : 24)
                 }
                 .background(Color.consoleBackground)
                 .toolbar(.hidden, for: .navigationBar)
                 .refreshable {
-                    await store.refreshProcesses()
+                    await store.refreshProcesses(machineId: store.selectedMachineId)
                 }
                 .confirmationDialog(
                     "Kill \(confirmKill?.name ?? "")?",
@@ -80,34 +87,53 @@ struct DevelopmentView: View {
 
 private struct ServicesTable: View {
     @Environment(SqwackStore.self) private var store
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    let machineId: String?
     let now: Date
     let onKill: (DevProcess) -> Void
 
     var body: some View {
-        let processes = store.processes()
+        let processes = store.processes(machineId: machineId)
         Panel(title: "SERVICES", badge: "\(processes.count) running") {
-            Grid(alignment: .leading, horizontalSpacing: 18, verticalSpacing: 12) {
+            if horizontalSizeClass == .compact {
+                ScrollView(.horizontal, showsIndicators: false) { table(processes) }
+            } else {
+                table(processes)
+            }
+        }
+    }
+
+    private func table(_ processes: [DevProcess]) -> some View {
+        Grid(alignment: .leading, horizontalSpacing: 18, verticalSpacing: 12) {
                 GridRow {
-                    ForEach(["PORT", "NAME", "TYPE", "PID", "PATH", "STATUS", "UPTIME", "CPU", "MEMORY", "ACTIONS"], id: \.self) { header in
+                    ForEach(["PORT", "NAME", "MACHINE", "TYPE", "PID", "PATH", "STATUS", "UPTIME", "CPU", "MEMORY", "ACTIONS"], id: \.self) { header in
                         Text(header).font(.caption.weight(.semibold)).foregroundStyle(.tertiary)
                     }
                 }
-                Divider().gridCellColumns(10)
+                Divider().gridCellColumns(11)
                 ForEach(processes) { process in
                     GridRow {
                         HStack(spacing: 8) {
-                            Circle().fill(.green).frame(width: 8, height: 8)
+                            if process.containerRuntime == "docker" {
+                                Text("🐳").font(.caption).accessibilityLabel("Container")
+                            } else {
+                                Circle().fill(.green).frame(width: 8, height: 8)
+                            }
                             Text(verbatim: process.port.map { ":\($0)" } ?? "—")
                                 .font(.system(.body, design: .monospaced, weight: .semibold))
                         }
                         Text(process.name).font(.body.weight(.medium)).lineLimit(1)
+                        Label(store.machineName(for: process.machineId), systemImage: "desktopcomputer")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
                         Text(process.category ?? "other")
                             .font(.caption.weight(.medium))
                             .padding(.horizontal, 8).padding(.vertical, 3)
                             .background(Capsule().fill(Color.white.opacity(0.07)))
                             .foregroundStyle(.secondary)
-                        Text(verbatim: "\(process.pid)").font(.body.monospacedDigit()).foregroundStyle(.secondary)
-                        Text(process.cwd ?? "—")
+                        Text(verbatim: process.containerRuntime == nil ? "\(process.pid)" : "—").font(.body.monospacedDigit()).foregroundStyle(.secondary)
+                        Text(process.containerRuntime == nil ? process.cwd ?? "—" : process.command ?? "—")
                             .font(.caption)
                             .foregroundStyle(.tertiary)
                             .lineLimit(1)
@@ -132,17 +158,20 @@ private struct ServicesTable: View {
                         Text(process.memoryBytes.map { Format.bytes($0) } ?? "—")
                             .font(.body.monospacedDigit())
                             .foregroundStyle(.secondary)
-                        ProcessActions(process: process, onKill: onKill)
+                        if process.containerRuntime == nil {
+                            ProcessActions(process: process, onKill: onKill)
+                        } else {
+                            Text("—").foregroundStyle(.tertiary)
+                        }
                     }
                 }
                 if processes.isEmpty {
                     GridRow {
                         Text("No development services detected")
                             .foregroundStyle(.secondary)
-                            .gridCellColumns(10)
+                            .gridCellColumns(11)
                     }
                 }
-            }
         }
     }
 }
@@ -173,12 +202,44 @@ private struct ProcessActions: View {
 
 // MARK: - Panels
 
+private struct MachineSystemSection: View {
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    let node: NodeConnection
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 10) {
+                Image(systemName: "desktopcomputer")
+                Text(node.machine?.name ?? "Mac").font(.title3.bold())
+                if let machine = node.machine {
+                    Text("\(machine.platform)/\(machine.architecture)")
+                        .font(.caption.monospaced())
+                        .foregroundStyle(.tertiary)
+                }
+                Spacer()
+                Circle()
+                    .fill(node.connectionState == .connected ? .green : .orange)
+                    .frame(width: 8, height: 8)
+                Text(node.connectionState == .connected ? "Connected" : "Reconnecting")
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(.secondary)
+            }
+
+            (horizontalSizeClass == .compact ? AnyLayout(VStackLayout(spacing: 14)) : AnyLayout(HStackLayout(alignment: .top, spacing: 20))) {
+                ResourcePanel(system: node.system)
+                SystemHealthPanel(system: node.system, status: node.status)
+            }
+            TopProcessesPanel(metrics: node.topProcesses)
+        }
+    }
+}
+
 private struct ResourcePanel: View {
-    @Environment(SqwackStore.self) private var store
+    let system: SystemSnapshot?
 
     var body: some View {
         Panel(title: "RESOURCE USAGE") {
-            if let stats = store.system?.stats {
+            if let stats = system?.stats {
                 ResourceRow(icon: "cpu", label: "CPU",
                             value: "\(Int(stats.cpuPercent))%",
                             detail: "Total across the machine",
@@ -228,7 +289,7 @@ private struct ResourceRow: View {
 }
 
 private struct RecentOutputPanel: View {
-    @Environment(SqwackStore.self) private var store
+    let items: [ActivityItem]
 
     private func dotColor(_ severity: String) -> Color {
         switch severity {
@@ -241,10 +302,10 @@ private struct RecentOutputPanel: View {
 
     var body: some View {
         Panel(title: "RECENT OUTPUT") {
-            if store.activity.isEmpty {
+            if items.isEmpty {
                 Text("No recent events").foregroundStyle(.tertiary)
             }
-            ForEach(store.activity.prefix(6)) { item in
+            ForEach(items.prefix(6)) { item in
                 HStack(spacing: 10) {
                     Text(verbatim: "[" + item.timestamp.formatted(date: .omitted, time: .standard) + "]")
                         .font(.caption.monospaced())
@@ -262,11 +323,12 @@ private struct RecentOutputPanel: View {
 }
 
 private struct SystemHealthPanel: View {
-    @Environment(SqwackStore.self) private var store
+    let system: SystemSnapshot?
+    let status: SqwackStatus
 
     var body: some View {
         Panel(title: "SYSTEM HEALTH") {
-            if let system = store.system {
+            if let system {
                 HealthRow(icon: "waveform.path.ecg", label: "CPU Load",
                           value: "\(Int(system.stats.cpuPercent))%", history: system.history.cpu, color: .green)
                 HealthRow(icon: "memorychip", label: "Memory",
@@ -283,9 +345,9 @@ private struct SystemHealthPanel: View {
                 HStack(spacing: 8) {
                     Image(systemName: "checkmark.shield")
                         .foregroundStyle(.green)
-                    Text(store.globalStatus == .quiet || store.globalStatus == .working ? "All systems normal" : "Attention needed")
+                    Text(status == .quiet || status == .working ? "All systems normal" : "Attention needed")
                         .font(.subheadline.weight(.medium))
-                        .foregroundStyle(store.globalStatus == .quiet || store.globalStatus == .working ? .green : .amber)
+                        .foregroundStyle(status == .quiet || status == .working ? .green : .amber)
                 }
                 .padding(.top, 6)
             } else {
@@ -296,6 +358,7 @@ private struct SystemHealthPanel: View {
 }
 
 private struct HealthRow: View {
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     let icon: String
     let label: String
     let value: String
@@ -310,17 +373,20 @@ private struct HealthRow: View {
             Text(value).font(.callout.weight(.semibold).monospacedDigit())
             Sparkline(values: history, color: color)
                 .frame(width: 90, height: 16)
+                .opacity(horizontalSizeClass == .compact ? 0 : 1)
+                .frame(width: horizontalSizeClass == .compact ? 0 : 90)
         }
     }
 }
 
 private struct TopProcessesPanel: View {
-    @Environment(SqwackStore.self) private var store
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    let metrics: [ProcessMetric]
 
     var body: some View {
         Panel(title: "TOP PROCESSES", badge: "By CPU") {
-            HStack(spacing: 14) {
-                ForEach(Array(store.topProcesses.prefix(5).enumerated()), id: \.element.id) { index, metric in
+            (horizontalSizeClass == .compact ? AnyLayout(VStackLayout(spacing: 10)) : AnyLayout(HStackLayout(spacing: 14))) {
+                ForEach(Array(metrics.prefix(5).enumerated()), id: \.element.id) { index, metric in
                     HStack(spacing: 10) {
                         Text(verbatim: "\(index + 1)")
                             .font(.caption.weight(.bold))
@@ -341,7 +407,7 @@ private struct TopProcessesPanel: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .background(RoundedRectangle(cornerRadius: 12).fill(Color.consolePanelRaised))
                 }
-                if store.topProcesses.isEmpty {
+                if metrics.isEmpty {
                     Text("Waiting for process metrics…").foregroundStyle(.tertiary)
                 }
             }

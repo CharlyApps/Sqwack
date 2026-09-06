@@ -23,11 +23,12 @@ struct ConnectionChip: View {
     @Environment(SqwackStore.self) private var store
 
     var body: some View {
+        let names = store.connectedMachineNames
         HStack(spacing: 7) {
             Circle()
                 .fill(store.anyConnected ? .green : .red)
                 .frame(width: 8, height: 8)
-            Text(store.machineName.isEmpty ? "No daemon" : store.machineName)
+            Text(names.isEmpty ? "No daemon" : names.count == 1 ? names[0] : "\(names.count) Macs")
                 .font(.caption.weight(.medium))
                 .foregroundStyle(.secondary)
         }
@@ -40,6 +41,7 @@ struct ConnectionChip: View {
 
 struct RootView: View {
     @Environment(SqwackStore.self) private var store
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @State private var selectedTab = ProcessInfo.processInfo.environment["SQWACK_TAB"] ?? "overview"
 
     var body: some View {
@@ -50,11 +52,15 @@ struct RootView: View {
                     DiagnosticBanner(message: error) {
                         store.clearError()
                     }
-                    .padding(.horizontal, 28)
+                    .padding(.horizontal, horizontalSizeClass == .compact ? 16 : 28)
                     .padding(.bottom, 8)
                 }
                 selectedView
-                AppFooter()
+                if horizontalSizeClass == .compact {
+                    MobileTabBar(selectedTab: $selectedTab)
+                } else {
+                    AppFooter()
+                }
             }
             .background(Color.consoleBackground)
             .onAppear { store.connectAll() }
@@ -127,6 +133,7 @@ private struct DiagnosticBanner: View {
 
 private struct AppChrome: View {
     @Environment(SqwackStore.self) private var store
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Binding var selectedTab: String
     private var tabs: [(String, String)] {
         [("overview", "Overview"), ("agents", "Agents"), ("development", "Development")]
@@ -134,7 +141,37 @@ private struct AppChrome: View {
             + [("settings", "Settings")]
     }
 
+    private var selectedMachineName: String {
+        guard let id = store.selectedMachineId else { return "All Macs" }
+        return store.nodes.first { $0.machine?.id == id }?.machine?.name ?? "All Macs"
+    }
+
     var body: some View {
+        if horizontalSizeClass == .compact {
+            compactChrome
+        } else {
+            regularChrome
+        }
+    }
+
+    private var compactChrome: some View {
+        HStack(spacing: 12) {
+            Image("DashboardLogo")
+                .resizable()
+                .scaledToFit()
+                .frame(width: 36, height: 36)
+            Text("SQWACK")
+                .font(.title3.weight(.heavy))
+            Spacer()
+            ConnectionChip()
+            refreshMenu
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
+        .background(Color.consoleBackground)
+    }
+
+    private var regularChrome: some View {
         HStack {
             HStack(spacing: 10) {
                 Image("DashboardLogo")
@@ -144,7 +181,7 @@ private struct AppChrome: View {
                 Text("SQWACK")
                     .font(.title2.weight(.heavy))
             }
-            .frame(width: 220, alignment: .leading)
+            .frame(width: 190, alignment: .leading)
 
             Spacer()
 
@@ -169,8 +206,28 @@ private struct AppChrome: View {
             .overlay(Capsule().strokeBorder(Color.white.opacity(0.12)))
 
             Spacer()
-            HStack {
+            HStack(spacing: 12) {
                 Spacer()
+                if store.nodes.compactMap(\.machine).count > 1 {
+                    Menu {
+                        Button("All Macs") { store.selectedMachineId = nil }
+                        ForEach(store.nodes, id: \.credentialRef) { node in
+                            if let machine = node.machine {
+                                Button(machine.name) { store.selectedMachineId = machine.id }
+                            }
+                        }
+                    } label: {
+                        Label(selectedMachineName, systemImage: "desktopcomputer")
+                            .font(.caption.weight(.semibold))
+                            .lineLimit(1)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 8)
+                            .background(Capsule().fill(Color.consolePanelRaised))
+                            .overlay(Capsule().strokeBorder(Color.consoleStroke))
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Computer profile")
+                }
                 TimelineView(.periodic(from: .now, by: 60)) { timeline in
                     VStack(alignment: .trailing, spacing: 1) {
                         Text(timeline.date, format: .dateTime.hour().minute())
@@ -181,46 +238,87 @@ private struct AppChrome: View {
                     }
                     .foregroundStyle(.secondary)
                 }
-                Menu {
-                    Button("Refresh Dashboard", systemImage: "arrow.clockwise") {
-                        Task { await store.refreshAll() }
-                    }
-                    Button("Refresh Agents", systemImage: "person.2") {
-                        Task { await store.refreshAgents() }
-                    }
-                    Button("Refresh Services", systemImage: "terminal") {
-                        Task { await store.refreshProcessesOnly() }
-                    }
-                    Button("Refresh Account Usage", systemImage: "chart.bar") {
-                        Task { await store.refreshUsage() }
-                    }
-                    Button("Refresh Codex Usage", systemImage: "cube.fill") {
-                        Task { await store.refreshUsage(provider: "codex") }
-                    }
-                    Button("Refresh Claude Usage", systemImage: "sparkles") {
-                        Task { await store.refreshUsage(provider: "claude") }
-                    }
-                    Button("Refresh DeepSeek Balance", systemImage: "creditcard") {
-                        Task { await store.refreshUsage(provider: "deepseek") }
-                    }
-                    Divider()
-                    Text(store.anyConnected ? "Connected" : "Disconnected")
-                } label: {
-                    Image(systemName: "arrow.clockwise.circle")
-                        .font(.title2.weight(.medium))
-                        .foregroundStyle(.primary)
-                        .frame(width: 44, height: 44)
-                        .background(Circle().fill(Color.consolePanelRaised))
-                        .overlay(Circle().strokeBorder(Color.consoleStrokeBright))
-                }
-                .buttonStyle(.plain)
+                refreshMenu
             }
-            .frame(width: 220, alignment: .trailing)
+            .frame(width: 300, alignment: .trailing)
         }
         .padding(.horizontal, 28)
         .padding(.top, 16)
         .padding(.bottom, 8)
         .background(Color.consoleBackground)
+    }
+
+    private var refreshMenu: some View {
+        Menu {
+            Button("Refresh Dashboard", systemImage: "arrow.clockwise") {
+                Task { await store.refreshAll(machineId: store.selectedMachineId) }
+            }
+            Button("Refresh Agents", systemImage: "person.2") {
+                Task { await store.refreshAgents(machineId: store.selectedMachineId) }
+            }
+            Button("Refresh Services", systemImage: "terminal") {
+                Task { await store.refreshProcessesOnly(machineId: store.selectedMachineId) }
+            }
+            Button("Refresh Account Usage", systemImage: "chart.bar") {
+                Task { await store.refreshUsage(machineId: store.selectedMachineId) }
+            }
+            if store.nodes.compactMap(\.machine).count > 1 {
+                Divider()
+                Menu("Computer", systemImage: "desktopcomputer") {
+                    Button("All Macs") { store.selectedMachineId = nil }
+                    ForEach(store.nodes, id: \.credentialRef) { node in
+                        if let machine = node.machine {
+                            Button(machine.name) { store.selectedMachineId = machine.id }
+                        }
+                    }
+                }
+            }
+            Divider()
+            Text(store.anyConnected ? "Connected" : "Disconnected")
+        } label: {
+            Image(systemName: "arrow.clockwise.circle")
+                .font(.title2.weight(.medium))
+                .foregroundStyle(.primary)
+                .frame(width: 44, height: 44)
+                .background(Circle().fill(Color.consolePanelRaised))
+                .overlay(Circle().strokeBorder(Color.consoleStrokeBright))
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+private struct MobileTabBar: View {
+    @Environment(SqwackStore.self) private var store
+    @Binding var selectedTab: String
+
+    private var tabs: [(String, String, String)] {
+        [("overview", "Overview", "rectangle.grid.2x2"),
+         ("agents", "Agents", "person.2"),
+         ("development", "Develop", "terminal")]
+            + (store.hasHermes ? [("hermes", "Hermes", "bolt.horizontal")] : [])
+            + [("settings", "Settings", "gearshape")]
+    }
+
+    var body: some View {
+        HStack(spacing: 0) {
+            ForEach(tabs, id: \.0) { id, title, icon in
+                Button { selectedTab = id } label: {
+                    VStack(spacing: 3) {
+                        Image(systemName: icon).font(.body.weight(.semibold))
+                        Text(title).font(.caption2)
+                    }
+                    .foregroundStyle(selectedTab == id ? Color.blue : Color.secondary)
+                    .frame(maxWidth: .infinity, minHeight: 48)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityAddTraits(selectedTab == id ? .isSelected : [])
+            }
+        }
+        .padding(.horizontal, 8)
+        .padding(.top, 4)
+        .background(.ultraThinMaterial)
+        .overlay(alignment: .top) { Divider() }
     }
 }
 
@@ -228,12 +326,16 @@ private struct AppFooter: View {
     @Environment(SqwackStore.self) private var store
 
     var body: some View {
+        let names = store.connectedMachineNames
         HStack {
             Label {
                 HStack(spacing: 4) {
                     Text("Connected to")
-                    Text(store.machineName.isEmpty ? "No daemon" : store.machineName)
+                    Text(names.isEmpty ? "No daemon" : names.joined(separator: ", "))
                         .foregroundStyle(.blue)
+                    if names.count > 1 {
+                        Text("(\(names.count) Macs)")
+                    }
                 }
             } icon: {
                 Image(systemName: "shield.checkered")

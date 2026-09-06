@@ -7,6 +7,7 @@ import Observation
 @Observable
 final class SqwackStore {
     private(set) var nodes: [NodeConnection] = []
+    var selectedMachineId: String?
 
     private static let endpointsKey = "sqwack.endpoints"
 
@@ -43,6 +44,7 @@ final class SqwackStore {
     }
 
     func removeNode(_ node: NodeConnection) {
+        if selectedMachineId == node.machine?.id { selectedMachineId = nil }
         node.disconnect()
         Keychain.delete(ref: node.credentialRef)
         var saved = UserDefaults.standard.stringArray(forKey: Self.endpointsKey) ?? []
@@ -51,30 +53,30 @@ final class SqwackStore {
         nodes.removeAll { $0 === node }
     }
 
-    func refreshUsage(provider: String? = nil) async {
-        for node in nodes {
+    func refreshUsage(provider: String? = nil, machineId: String? = nil) async {
+        for node in nodes where machineId == nil || node.machine?.id == machineId {
             await node.refreshUsage(provider: provider)
         }
     }
 
-    func refreshAll() async {
-        for node in nodes {
+    func refreshAll(machineId: String? = nil) async {
+        for node in nodes where machineId == nil || node.machine?.id == machineId {
             await node.refreshSnapshot()
         }
     }
 
-    func refreshAgents() async {
-        await refreshAll()
+    func refreshAgents(machineId: String? = nil) async {
+        await refreshAll(machineId: machineId)
     }
 
-    func refreshProcessesOnly() async {
-        for node in nodes {
+    func refreshProcessesOnly(machineId: String? = nil) async {
+        for node in nodes where machineId == nil || node.machine?.id == machineId {
             await node.refreshProcesses()
         }
     }
 
-    func refreshProcesses() async {
-        await refreshAll()
+    func refreshProcesses(machineId: String? = nil) async {
+        await refreshAll(machineId: machineId)
     }
 
     var lastError: String? {
@@ -103,11 +105,21 @@ final class SqwackStore {
             .sorted { ($0.port ?? 0) < ($1.port ?? 0) }
     }
 
+    func machineName(for machineId: String) -> String {
+        nodes.first { $0.machine?.id == machineId }?.machine?.name ?? machineId
+    }
+
     /// MVP: system stats of the first (only) machine. Multi-machine: key by machineId.
     var system: SystemSnapshot? { nodes.first?.system }
     var topProcesses: [ProcessMetric] { nodes.first?.topProcesses ?? [] }
     var activity: [ActivityItem] {
         nodes.flatMap(\.activity).sorted { $0.timestamp > $1.timestamp }
+    }
+    func activity(machineId: String? = nil) -> [ActivityItem] {
+        nodes
+            .filter { machineId == nil || $0.machine?.id == machineId }
+            .flatMap(\.activity)
+            .sorted { $0.timestamp > $1.timestamp }
     }
     var machineName: String { nodes.first?.machine?.name ?? "" }
     var machineInfo: String {
@@ -116,20 +128,30 @@ final class SqwackStore {
     }
     var daemonVersion: String { nodes.first?.machine?.daemonVersion ?? "0.1.0" }
 
-    var usage: [ProviderUsage] {
-        nodes.flatMap(\.usage).sorted { $0.provider < $1.provider }
+    func usage(machineId: String? = nil) -> [ProviderUsage] {
+        let values = nodes
+            .filter { machineId == nil || $0.machine?.id == machineId }
+            .flatMap(\.usage)
+        return Dictionary(grouping: values, by: \.provider)
+            .compactMap { $0.value.max { $0.collectedAt < $1.collectedAt } }
+            .sorted { $0.provider < $1.provider }
     }
+    var usage: [ProviderUsage] { usage() }
 
     var hermesNodes: [NodeConnection] {
-        nodes.filter { !($0.hermes?.gateways.isEmpty ?? true) }
+        nodes.filter {
+            (selectedMachineId == nil || $0.machine?.id == selectedMachineId)
+                && !($0.hermes?.gateways.isEmpty ?? true)
+        }
     }
 
     var hasHermes: Bool { !hermesNodes.isEmpty }
 
     /// Global status = worst status across machines (attention > failure > working > quiet).
-    var globalStatus: SqwackStatus {
-        nodes.map(\.status).max() ?? .quiet
+    func status(machineId: String? = nil) -> SqwackStatus {
+        nodes.filter { machineId == nil || $0.machine?.id == machineId }.map(\.status).max() ?? .quiet
     }
+    var globalStatus: SqwackStatus { status() }
 
     var attention: [AgentSession] {
         sessions().filter { $0.state == .needsInput || $0.state == .failed }
@@ -137,8 +159,8 @@ final class SqwackStore {
 
     /// Sessions worth showing on the ambient board: anything active, plus
     /// recently finished ones (done/failed fade out after an hour).
-    var boardSessions: [AgentSession] {
-        sessions().filter { session in
+    func boardSessions(machineId: String? = nil) -> [AgentSession] {
+        sessions(machineId: machineId).filter { session in
             switch session.state {
             case .working, .needsInput: true
             case .done, .failed: session.updatedAt > .now.addingTimeInterval(-3600)
@@ -146,6 +168,10 @@ final class SqwackStore {
             }
         }
     }
+    var boardSessions: [AgentSession] { boardSessions() }
 
     var anyConnected: Bool { nodes.contains { $0.connectionState == .connected } }
+    var connectedMachineNames: [String] {
+        nodes.filter { $0.connectionState == .connected }.compactMap { $0.machine?.name }
+    }
 }

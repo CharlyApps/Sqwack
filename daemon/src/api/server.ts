@@ -36,7 +36,10 @@ function bearer(req: IncomingMessage): string | undefined {
   return h?.startsWith("Bearer ") ? h.slice(7) : undefined;
 }
 
-export function startServer(engine: Engine) {
+export function startServer(
+  engine: Engine,
+  timesGate?: { configured: boolean; enabled: boolean; setEnabled(enabled: boolean): Promise<void> },
+) {
   const auth = new Auth(engine.store);
   const killTimestamps: number[] = [];
   type Caller = NonNullable<ReturnType<Auth["authenticate"]>>;
@@ -135,6 +138,21 @@ export function startServer(engine: Engine) {
         const provider = body.provider as UsageProvider | undefined;
         await engine.refreshUsage(provider);
         return json(res, 200, { usage: engine.snapshot().usage });
+      }
+
+      if (method === "GET" && path === "/v1/timesgate") {
+        return json(res, 200, {
+          configured: timesGate?.configured ?? false,
+          enabled: timesGate?.enabled ?? false,
+        });
+      }
+
+      if (method === "POST" && path === "/v1/timesgate") {
+        if (!timesGate?.configured) return json(res, 404, { error: "Times Gate is not configured" });
+        const body = (await readBody(req)) as { enabled?: unknown };
+        if (typeof body.enabled !== "boolean") return json(res, 400, { error: "enabled must be boolean" });
+        await timesGate.setEnabled(body.enabled);
+        return json(res, 200, { configured: true, enabled: timesGate.enabled });
       }
 
       const killMatch = path.match(/^\/v1\/processes\/([^/]+)\/kill$/);

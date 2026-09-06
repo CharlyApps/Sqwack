@@ -4,8 +4,12 @@
   "description": "Sqwack local machine daemon",
   "type": "module",
   "private": true,
-  "bin": { "sqwackd": "./bin/sqwackd" },
-  "engines": { "node": ">=24" },
+  "bin": {
+    "sqwackd": "./bin/sqwackd"
+  },
+  "engines": {
+    "node": ">=24"
+  },
   "scripts": {
     "start": "node src/index.ts start",
     "demo": "node src/index.ts demo",
@@ -14,6 +18,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "sharp": "^0.35.3",
     "ws": "^8.18.0"
   },
   "devDependencies": {

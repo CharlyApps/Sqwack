@@ -2,13 +2,15 @@
 import { execFileSync, execFile } from "node:child_process";
 import { existsSync, readFileSync, writeFileSync, mkdirSync, statSync } from "node:fs";
 import { homedir, networkInterfaces } from "node:os";
+import { createConnection } from "node:net";
 import { join, resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { DATA_DIR, VERSION, loadConfig } from "./config.ts";
+import { DATA_DIR, VERSION, loadConfig, saveConfig } from "./config.ts";
 import { initLog, log, LOG_PATH } from "./log.ts";
 import { openStore } from "./persistence/db.ts";
 import { Engine } from "./core.ts";
 import { startServer } from "./api/server.ts";
+import { startTimesGate } from "./outputs/timesgate.ts";
 import { adminToken } from "./auth/auth.ts";
 import { runDemo } from "./demo.ts";
 import { installClaude, installCodex, installHermes, integrationsStatus } from "./adapters/install.ts";
@@ -89,7 +91,8 @@ async function cmdStart(): Promise<void> {
   const store = openStore(DATA_DIR);
   store.prune(config.retentionDays.events, config.retentionDays.sessions);
   const engine = new Engine(store, config);
-  const api = startServer(engine);
+  const timesGate = startTimesGate(engine);
+  const api = startServer(engine, timesGate);
   log.info(`machine ${config.machineName} (${config.machineId})`);
   if (config.network.tailscaleServe) {
     // Serve config persists inside tailscaled, so `sqwackd setup` (which runs
@@ -104,6 +107,7 @@ async function cmdStart(): Promise<void> {
   }
   const shutdown = () => {
     log.info("shutting down");
+    timesGate.close();
     api.close();
     store.close();
     process.exit(0);
@@ -202,17 +206,98 @@ function cmdPrune(): void {
   console.log("Restart the daemon (sqwackd restart) so its in-memory view refreshes.");
 }
 
-function cmdRestart(): void {
+function restartLaunchAgent(): boolean {
   const uid = process.getuid?.();
   try {
     // -k kills the running instance; launchd starts it again immediately.
     // Pairing is unaffected: device tokens live in SQLite, not in memory.
     execFileSync("launchctl", ["kickstart", "-k", `gui/${uid}/com.sqwack.sqwackd`], { stdio: "pipe" });
-    console.log("sqwackd restarted.");
+    return true;
   } catch {
+    return false;
+  }
+}
+
+function cmdRestart(): void {
+  if (restartLaunchAgent()) console.log("sqwackd restarted.");
+  else {
     console.error("LaunchAgent not loaded — run: sqwackd setup");
     process.exit(1);
   }
+}
+
+function timesGateHost(mac: string): string | undefined {
+  try {
+    for (const line of execFileSync("arp", ["-an"], { encoding: "utf8" }).split("\n")) {
+      const match = line.match(/\(([\d.]+)\) at ([\da-f:]+)/i);
+      if (match?.[2].toLowerCase() === mac) return match[1];
+    }
+  } catch { /* arp is unavailable */ }
+}
+
+async function discoverTimesGate(mac: string): Promise<string | undefined> {
+  const cached = timesGateHost(mac);
+  if (cached) return cached;
+  const prefix = lanIP()?.split(".").slice(0, 3).join(".");
+  if (!prefix) return undefined;
+  await Promise.all(Array.from({ length: 254 }, (_, index) => new Promise<void>((resolve) => {
+    const socket = createConnection({ host: `${prefix}.${index + 1}`, port: 80 });
+    const done = () => { socket.destroy(); resolve(); };
+    socket.setTimeout(300, done);
+    socket.once("connect", done);
+    socket.once("error", done);
+  })));
+  return timesGateHost(mac);
+}
+
+async function cmdTimesGate(): Promise<void> {
+  const config = loadConfig();
+  if (!config.timesGate) {
+    console.error("Times Gate is not configured in ~/.sqwack/config.json");
+    process.exit(1);
+  }
+  const action = args[0] ?? "status";
+  const current = config.timesGate.enabled !== false;
+  if (action === "find") {
+    const mac = (args[1] ?? config.timesGate.mac)?.toLowerCase().replaceAll("-", ":");
+    if (!mac || !/^([\da-f]{2}:){5}[\da-f]{2}$/.test(mac)) {
+      console.error("usage: sqwackd timesgate find [mac-address]");
+      process.exit(1);
+    }
+    const host = await discoverTimesGate(mac);
+    if (!host) {
+      console.error(`Times Gate ${mac} was not found on this LAN.`);
+      process.exit(1);
+    }
+    saveConfig({ ...config, timesGate: { ...config.timesGate, host, mac } });
+    if (current && !restartLaunchAgent()) {
+      console.error(`Found ${host} and saved it, but the daemon could not restart.`);
+      process.exit(1);
+    }
+    console.log(`Times Gate found at ${host}; address saved${current ? " and dashboard restored" : ""}.`);
+    return;
+  }
+  if (action === "status") {
+    console.log(`Times Gate output is ${current ? "on" : "off"} at ${config.timesGate.host}.`);
+    return;
+  }
+  if (!['on', 'off', 'toggle'].includes(action)) {
+    console.error("usage: sqwackd timesgate [on | off | toggle | status | find [mac-address]]");
+    process.exit(1);
+  }
+  const enabled = action === "toggle" ? !current : action === "on";
+  if (enabled === current) {
+    console.log(`Times Gate output is already ${enabled ? "on" : "off"}.`);
+    return;
+  }
+  saveConfig({ ...config, timesGate: { ...config.timesGate, enabled } });
+  if (!restartLaunchAgent()) {
+    console.error("Setting saved, but the daemon could not restart — run: sqwackd setup");
+    process.exit(1);
+  }
+  console.log(enabled
+    ? "Times Gate output is on; restoring the Sqwack dashboard."
+    : "Times Gate output is off; use the Divoom app or Mode control.");
 }
 
 function cmdUninstall(): void {
@@ -375,6 +460,7 @@ usage: sqwackd <command>
   start                       run the daemon in the foreground
   setup                       install + start as a LaunchAgent (auto-start at login)
   restart                     restart the daemon (pairing and data are untouched)
+  timesgate [on|off|toggle|status|find] control or locate the Times Gate
   prune [--all]               apply retention now (or clear all history) and compact the DB
   uninstall                   remove the LaunchAgent
   status                      one-glance daemon status
@@ -393,6 +479,7 @@ const commands: Record<string, () => void | Promise<void>> = {
   start: cmdStart,
   setup: cmdSetup,
   restart: cmdRestart,
+  timesgate: cmdTimesGate,
   prune: cmdPrune,
   uninstall: cmdUninstall,
   status: cmdStatus,

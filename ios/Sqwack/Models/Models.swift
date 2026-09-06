@@ -73,6 +73,7 @@ struct DevProcess: Codable, Identifiable, Equatable {
     var protocolName: String?
     var startedAt: Date?
     var category: String?
+    var containerRuntime: String?
     var killable: Bool
     var cpuPercent: Double?
     var memoryBytes: Int64?
@@ -81,7 +82,7 @@ struct DevProcess: Codable, Identifiable, Equatable {
     enum CodingKeys: String, CodingKey {
         case id, machineId, pid, name, command, cwd, port
         case protocolName = "protocol"
-        case startedAt, category, killable, cpuPercent, memoryBytes, cpuHistory
+        case startedAt, category, containerRuntime, killable, cpuPercent, memoryBytes, cpuHistory
     }
 }
 
