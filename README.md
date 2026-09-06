@@ -2,7 +2,8 @@
 
 Sqwack is a local status board for your development machine.
 
-It runs a small macOS daemon, `sqwackd`, and a native iPad app. The daemon watches
+It runs a small macOS daemon, `sqwackd`, and a native iPad or Android tablet app.
+The daemon watches
 your AI coding agents and local development services, then streams a live status
 view to the iPad over your LAN or Tailscale.
 
@@ -18,7 +19,7 @@ AI agents + dev services
    LAN or Tailscale
           |
           v
-       Sqwack               iPad app
+       Sqwack               iPad / Android app
 ```
 
 ## What It Shows
@@ -41,8 +42,8 @@ AI agents + dev services
 
 - macOS
 - Node.js 24 or newer
-- Xcode 16 or newer
-- iPadOS 18 or newer
+- Xcode 16 or newer, for the iPad app
+- iPadOS 18 or newer, or Android 8.0 or newer for the tablet app
 - CodexBar 0.49 or newer, for account usage and balance cards
 - Tailscale, optional but recommended
 
@@ -81,6 +82,19 @@ open ios/Sqwack.xcodeproj
 ```
 
 Select the `Sqwack` scheme in Xcode and run it on an iPad simulator or device.
+
+### Android Tablet
+
+The Android app in `android/` mirrors the iPad app screen for screen (Compose,
+same wire protocol, same pairing flow). Build and install it with:
+
+```bash
+cd android && ./gradlew installDebug
+```
+
+Or open the `android/` folder in Android Studio. It needs Android 8.0 or newer,
+keeps the screen awake while open, and stores the device credential in the app's
+private storage instead of the iOS Keychain.
 
 ## Pair The iPad
 
